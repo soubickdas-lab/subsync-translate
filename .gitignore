@@ -1,4 +1,6 @@
 venv/
+.claude/
+*.wav
 models/
 tmp/
 __pycache__/

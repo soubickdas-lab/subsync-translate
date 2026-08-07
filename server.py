@@ -415,7 +415,9 @@ async def create_job(
     model_size: str = Form("large-v3"),
 ):
     suffix = os.path.splitext(audio.filename or "audio.bin")[1] or ".bin"
-    fd, tmp_path = tempfile.mkstemp(suffix=suffix, dir=str(BASE))
+    tmp_dir = BASE / "tmp"
+    tmp_dir.mkdir(exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(suffix=suffix, dir=str(tmp_dir))
     with os.fdopen(fd, "wb") as f:
         while chunk := await audio.read(1 << 20):
             f.write(chunk)
