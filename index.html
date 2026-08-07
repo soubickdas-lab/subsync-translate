@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SubSync Translate — Whisper SRT Translator & Re-Timer</title>
+<meta name="description" content="Upload audio + SRT → get a translated SRT with the exact same segment breaks, re-timed precisely from the audio using Whisper large-v3.">
+<link rel="stylesheet" href="style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎙️</text></svg>">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-icon">🎙️</span>
+    <div>
+      <h1>SubSync Translate</h1>
+      <p>Whisper large-v3 · Re-time SRT from audio · Translate keeping the exact same breaks</p>
+    </div>
+  </div>
+  <a class="gh-link" id="ghLink" href="#" target="_blank" rel="noopener" title="View on GitHub">GitHub ↗</a>
+</header>
+
+<main>
+
+  <!-- STEP 0: API KEY -->
+  <section class="card" id="keyCard">
+    <h2><span class="step">1</span> Groq API Key <span class="badge free">free</span></h2>
+    <p class="hint">Whisper <b>large-v3</b> runs on Groq's free API. Get a key at
+      <a href="https://console.groq.com/keys" target="_blank" rel="noopener">console.groq.com/keys</a>
+      — it stays in your browser (localStorage), never sent anywhere else.</p>
+    <div class="row">
+      <input type="password" id="apiKey" placeholder="gsk_..." autocomplete="off" spellcheck="false">
+      <button class="btn ghost" id="toggleKey" title="Show/hide">👁</button>
+    </div>
+  </section>
+
+  <!-- STEP 1: FILES -->
+  <section class="card">
+    <h2><span class="step">2</span> Upload Files</h2>
+    <div class="grid2">
+      <div class="drop" id="dropAudio">
+        <input type="file" id="audioFile" accept="audio/*,video/*,.mp3,.wav,.m4a,.mp4,.mkv,.aac,.ogg,.flac,.webm,.opus" hidden>
+        <div class="drop-icon">🎵</div>
+        <div class="drop-title">Audio file</div>
+        <div class="drop-sub">mp3 · wav · m4a · flac · ogg … (video files: audio track is used)</div>
+        <div class="file-chip" id="audioChip" hidden></div>
+      </div>
+      <div class="drop" id="dropSrt">
+        <input type="file" id="srtFile" accept=".srt,.vtt,text/plain" hidden>
+        <div class="drop-icon">💬</div>
+        <div class="drop-title">Subtitle file (.srt / .vtt)</div>
+        <div class="drop-sub">The source subtitle whose breaks will be preserved</div>
+        <div class="file-chip" id="srtChip" hidden></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- STEP 2: OPTIONS -->
+  <section class="card">
+    <h2><span class="step">3</span> Options</h2>
+    <div class="grid4">
+      <label class="field">
+        <span>Audio language</span>
+        <select id="srcLang"></select>
+        <small>Auto-detect uses Whisper's own detection</small>
+      </label>
+      <label class="field">
+        <span>Whisper model</span>
+        <select id="whisperModel">
+          <option value="whisper-large-v3" selected>whisper-large-v3 (best)</option>
+          <option value="whisper-large-v3-turbo">whisper-large-v3-turbo (faster)</option>
+        </select>
+        <small>large-v3 = most accurate timestamps</small>
+      </label>
+      <label class="field">
+        <span>Translate to</span>
+        <select id="tgtLang"></select>
+        <small>Output SRT language</small>
+      </label>
+      <label class="field">
+        <span>Translation engine</span>
+        <select id="engine">
+          <option value="google" selected>Google Translate (free, no key)</option>
+          <option value="groq">Groq LLM — llama-3.3-70b (better quality)</option>
+        </select>
+        <small>Groq LLM uses the same API key</small>
+      </label>
+    </div>
+  </section>
+
+  <!-- RUN -->
+  <section class="card run-card">
+    <button class="btn primary big" id="runBtn" disabled>⚡ Transcribe · Re-time · Translate</button>
+    <div class="progress-wrap" id="progressWrap" hidden>
+      <div class="progress"><div class="bar" id="bar"></div></div>
+      <div class="status" id="status"></div>
+    </div>
+    <div class="log" id="log" hidden></div>
+  </section>
+
+  <!-- RESULTS -->
+  <section class="card" id="resultCard" hidden>
+    <h2><span class="step">4</span> Result
+      <span class="badge" id="detectedBadge" hidden></span>
+      <span class="badge ok" id="matchBadge" hidden></span>
+    </h2>
+    <p class="hint">Translated text cells are <b>editable</b> — click any cell to fix wording before downloading. Timings shown as <s>original</s> → re-timed.</p>
+    <div class="table-wrap">
+      <table id="resultTable">
+        <thead>
+          <tr><th>#</th><th>Timing (original → re-timed)</th><th id="thOrig">Original</th><th id="thTrans">Translated</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <div class="dl-row">
+      <button class="btn primary" id="dlTranslated">⬇ Download translated SRT</button>
+      <button class="btn ghost" id="dlRetimed">⬇ Download re-timed original SRT</button>
+      <button class="btn ghost" id="dlTranscript">⬇ Download raw Whisper transcript</button>
+    </div>
+  </section>
+
+  <footer>
+    <p>Everything runs in your browser — files are sent only to the Groq API (transcription) and your chosen translation engine. No server, no upload storage.</p>
+  </footer>
+</main>
+
+<script src="app.js"></script>
+</body>
+</html>
