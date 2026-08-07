@@ -9,9 +9,32 @@ Ever have an English SRT whose timings drift from the actual audio? This tool:
 3. **Translates** every segment to your chosen language (Google Translate free, or Groq LLM for higher quality)
 4. Gives you a **translated SRT** + a **re-timed original SRT** to download
 
-Everything runs **100% in your browser** — no server, no install, no upload storage.
+Two ways to use it:
 
-**▶ Live tool: [soubickdas-lab.github.io/subsync-translate](https://soubickdas-lab.github.io/subsync-translate/)**
+| Mode | Best for | Needs |
+|---|---|---|
+| **🖥️ Local (recommended)** — Whisper + NLLB run on YOUR machine, no API at all | Privacy, big files, unlimited use, GPU speed | Windows + one-time model download |
+| **🌐 Online** — [soubickdas-lab.github.io/subsync-translate](https://soubickdas-lab.github.io/subsync-translate/) | Quick use from any device | Free Groq API key |
+
+## 🖥️ Local mode (no API, 100% offline after first run)
+
+**Quick start:** download/clone this repo, then double-click **`start-local.bat`** — bas. Pehli baar ye khud Python + dependencies setup karega, phir browser khol dega. First run downloads Whisper large-v3 (~3 GB) + NLLB-200 translation model (~2.4 GB) — one time only.
+
+| File | Kya karta hai |
+|---|---|
+| `start-local.bat` | Server start + browser open (pehli baar setup bhi khud kar leta hai) |
+| `setup.bat` | Manual setup (Python + dependencies) — normally zaroorat nahi |
+| `update.bat` | GitHub se latest version le aao (venv/models safe rehte hain) |
+| `server.py` | FastAPI backend — transcription, alignment, translation |
+| `static/index.html` | Pura local frontend (single file) |
+| `requirements.txt` | Python dependencies |
+
+- **GPU**: NVIDIA GPU ho to CUDA pe chalta hai (float16), warna CPU (int8) pe — auto-detect, auto-fallback
+- **Transcription**: [faster-whisper](https://github.com/SYSTRAN/faster-whisper) large-v3 (ya turbo/medium/small/base), word timestamps ke saath — koi file-size limit nahi
+- **Translation**: Meta ka [NLLB-200](https://huggingface.co/facebook/nllb-200-distilled-600M) (distilled-600M, CTranslate2 float16/int8) — 35+ languages, fully local
+- Video files (mp4/mkv) bhi chalti hain — audio track khud nikal leta hai
+
+## 🌐 Online mode (GitHub Pages)
 
 ## ✨ Features
 

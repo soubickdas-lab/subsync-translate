@@ -1,0 +1,6 @@
+venv/
+models/
+tmp/
+__pycache__/
+*.pyc
+.setup-ok

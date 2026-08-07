@@ -1,0 +1,455 @@
+"""
+SubSync Translate — 100% LOCAL backend.
+
+FastAPI server:
+  - Whisper (faster-whisper, large-v3) transcription with word timestamps — GPU if available
+  - SRT segment ↔ whisper-word alignment (breaks preserved, timings corrected)
+  - Local translation with NLLB-200-distilled-600M (CTranslate2) — no external API
+
+Run:  python server.py   (or start-local.bat)
+"""
+
+import glob
+import json
+import os
+import re
+import sys
+import tempfile
+import threading
+import time
+import unicodedata
+import uuid
+import webbrowser
+from pathlib import Path
+
+BASE = Path(__file__).resolve().parent
+MODELS_DIR = BASE / "models"
+MODELS_DIR.mkdir(exist_ok=True)
+
+# --- make pip-installed CUDA DLLs (nvidia-cublas-cu12 / nvidia-cudnn-cu12) visible ---
+def _add_cuda_dll_dirs():
+    if os.name != "nt":
+        return
+    import sysconfig
+    sp = sysconfig.get_paths()["purelib"]
+    dirs = glob.glob(os.path.join(sp, "nvidia", "*", "bin"))
+    for p in dirs:
+        try:
+            os.add_dll_directory(p)
+        except OSError:
+            pass
+    # ctranslate2 resolves CUDA DLLs via PATH, not the add_dll_directory list
+    if dirs:
+        os.environ["PATH"] = os.pathsep.join(dirs) + os.pathsep + os.environ.get("PATH", "")
+
+_add_cuda_dll_dirs()
+
+import ctranslate2  # noqa: E402
+import uvicorn  # noqa: E402
+from fastapi import FastAPI, File, Form, UploadFile  # noqa: E402
+from fastapi.responses import JSONResponse  # noqa: E402
+from fastapi.staticfiles import StaticFiles  # noqa: E402
+
+PORT = 8756
+NLLB_HF = "facebook/nllb-200-distilled-600M"
+NLLB_DIR = MODELS_DIR / "nllb-200-distilled-600M-ct2"
+
+try:
+    CUDA = ctranslate2.get_cuda_device_count() > 0
+except Exception:
+    CUDA = False
+DEVICE = "cuda" if CUDA else "cpu"
+
+# ---------------- language maps ----------------
+
+# UI/Whisper ISO code -> NLLB FLORES-200 code
+FLORES = {
+    "en": "eng_Latn", "hi": "hin_Deva", "bn": "ben_Beng", "ta": "tam_Taml",
+    "te": "tel_Telu", "ml": "mal_Mlym", "mr": "mar_Deva", "gu": "guj_Gujr",
+    "kn": "kan_Knda", "pa": "pan_Guru", "ur": "urd_Arab", "ne": "npi_Deva",
+    "si": "sin_Sinh", "es": "spa_Latn", "fr": "fra_Latn", "de": "deu_Latn",
+    "it": "ita_Latn", "pt": "por_Latn", "ru": "rus_Cyrl", "ja": "jpn_Jpan",
+    "ko": "kor_Hang", "zh": "zho_Hans", "zh-CN": "zho_Hans", "zh-TW": "zho_Hant",
+    "ar": "arb_Arab", "id": "ind_Latn", "vi": "vie_Latn", "th": "tha_Thai",
+    "tr": "tur_Latn", "nl": "nld_Latn", "pl": "pol_Latn", "uk": "ukr_Cyrl",
+    "fa": "pes_Arab", "ms": "zsm_Latn", "fil": "tgl_Latn", "tl": "tgl_Latn",
+    "sw": "swh_Latn",
+}
+
+# ---------------- model cache (lazy, one at a time) ----------------
+
+_model_lock = threading.Lock()
+_whisper_models = {}
+_nllb = {"translator": None, "tokenizer": None}
+
+
+def get_whisper(size, log):
+    with _model_lock:
+        if size in _whisper_models:
+            return _whisper_models[size]
+        from faster_whisper import WhisperModel
+        compute = "float16" if CUDA else "int8"
+        log(f"Loading Whisper '{size}' on {DEVICE} ({compute}) — first time downloads the model…")
+        try:
+            m = WhisperModel(size, device=DEVICE, compute_type=compute,
+                             download_root=str(MODELS_DIR / "whisper"))
+        except Exception as e:
+            if CUDA:
+                log(f"GPU load failed ({e}) — falling back to CPU int8.")
+                m = WhisperModel(size, device="cpu", compute_type="int8",
+                                 download_root=str(MODELS_DIR / "whisper"))
+            else:
+                raise
+        _whisper_models.clear()  # keep memory bounded: one whisper model at a time
+        _whisper_models[size] = m
+        log("Whisper model ready.")
+        return m
+
+
+def get_nllb(log):
+    with _model_lock:
+        if _nllb["translator"] is not None:
+            return _nllb["translator"], _nllb["tokenizer"]
+
+        if not (NLLB_DIR / "model.bin").exists():
+            log("First run: downloading + converting NLLB-200 translation model (~2.4 GB download, one time)…")
+            from ctranslate2.converters import TransformersConverter
+            conv = TransformersConverter(NLLB_HF, load_as_float16=True)
+            conv.convert(str(NLLB_DIR), quantization="float16", force=True)
+            log("NLLB conversion done.")
+
+        log(f"Loading NLLB translator on {DEVICE}…")
+        compute = "float16" if CUDA else "int8"
+        try:
+            tr = ctranslate2.Translator(str(NLLB_DIR), device=DEVICE, compute_type=compute)
+        except Exception as e:
+            log(f"GPU load failed ({e}) — falling back to CPU int8.")
+            tr = ctranslate2.Translator(str(NLLB_DIR), device="cpu", compute_type="int8")
+
+        from transformers import AutoTokenizer
+        tok = AutoTokenizer.from_pretrained(NLLB_HF, cache_dir=str(MODELS_DIR / "hf"))
+        _nllb["translator"], _nllb["tokenizer"] = tr, tok
+        log("Translator ready.")
+        return tr, tok
+
+
+# ---------------- subtitle parsing / helpers ----------------
+
+TIME_RE = re.compile(r"^(?:(\d+):)?(\d+):(\d+)[.,](\d{1,3})$")
+
+
+def parse_time(t):
+    m = TIME_RE.match(t.strip())
+    if not m:
+        raise ValueError(f"bad timestamp: {t}")
+    h = int(m.group(1) or 0)
+    return h * 3600 + int(m.group(2)) * 60 + int(m.group(3)) + int(m.group(4).ljust(3, "0")) / 1000.0
+
+
+def parse_subtitle(raw):
+    text = raw.lstrip("﻿").replace("\r\n", "\n").replace("\r", "\n")
+    if text.strip().startswith("WEBVTT"):
+        text = re.sub(r"^WEBVTT[^\n]*\n", "", text)
+    segs = []
+    for block in re.split(r"\n\s*\n", text):
+        lines = [l.strip() for l in block.split("\n") if l.strip()]
+        if not lines:
+            continue
+        i = 0
+        if "-->" not in lines[i]:
+            i += 1
+        if i >= len(lines) or "-->" not in lines[i]:
+            continue
+        a, b = lines[i].split("-->")
+        start = parse_time(a)
+        end = parse_time(b.strip().split()[0])
+        body = "\n".join(lines[i + 1:])
+        body = re.sub(r"<[^>]+>", "", body)
+        body = re.sub(r"\{\\[^}]*\}", "", body).strip()
+        if not body:
+            continue
+        segs.append({"index": len(segs) + 1, "start": start, "end": end, "text": body})
+    return segs
+
+
+def norm_word(w):
+    w = unicodedata.normalize("NFKD", w.lower())
+    return "".join(c for c in w if unicodedata.category(c)[0] in ("L", "N"))
+
+
+# ---------------- alignment ----------------
+
+def align_segments(segments, words):
+    ww = [dict(w, norm=norm_word(w["word"])) for w in words]
+    ww = [w for w in ww if w["norm"]]
+
+    s_words = []
+    for si, seg in enumerate(segments):
+        for raw in seg["text"].split():
+            n = norm_word(raw)
+            if n:
+                s_words.append((n, si))
+
+    WINDOW = 18
+    seg_matches = [[] for _ in segments]
+    wi = 0
+    for n, si in s_words:
+        for j in range(wi, min(wi + WINDOW, len(ww))):
+            if ww[j]["norm"] == n:
+                seg_matches[si].append(ww[j])
+                wi = j + 1
+                break
+
+    total_words = total_matched = matched_count = 0
+    for i, seg in enumerate(segments):
+        m = seg_matches[i]
+        wc = len([1 for r in seg["text"].split() if norm_word(r)]) or 1
+        need = 1 if wc <= 3 else max(2, -(-wc * 3 // 10))  # ceil(0.3*wc)
+        total_words += wc
+        total_matched += len(m)
+        if len(m) >= need:
+            seg["newStart"] = m[0]["start"]
+            seg["newEnd"] = m[-1]["end"]
+            seg["matched"] = True
+            matched_count += 1
+        else:
+            seg["matched"] = False
+
+    _interpolate_unmatched(segments)
+    _enforce_monotonic(segments)
+    return {
+        "matchedSegments": matched_count,
+        "totalSegments": len(segments),
+        "wordMatchRatio": (total_matched / total_words) if total_words else 0,
+    }
+
+
+def _interpolate_unmatched(segments):
+    n = len(segments)
+    i = 0
+    while i < n:
+        if segments[i]["matched"]:
+            i += 1
+            continue
+        j = i
+        while j + 1 < n and not segments[j + 1]["matched"]:
+            j += 1
+        prev = segments[i - 1] if i > 0 else None
+        nxt = segments[j + 1] if j + 1 < n else None
+
+        if prev and nxt:
+            old_lo, old_hi = prev["end"], nxt["start"]
+            new_lo, new_hi = prev["newEnd"], nxt["newStart"]
+            scale = max(new_hi - new_lo, 0) / max(old_hi - old_lo, 0.001)
+            for k in range(i, j + 1):
+                segments[k]["newStart"] = new_lo + (segments[k]["start"] - old_lo) * scale
+                segments[k]["newEnd"] = new_lo + (segments[k]["end"] - old_lo) * scale
+        elif nxt:
+            d = nxt["newStart"] - nxt["start"]
+            for k in range(i, j + 1):
+                segments[k]["newStart"] = max(0.0, segments[k]["start"] + d)
+                segments[k]["newEnd"] = max(0.0, segments[k]["end"] + d)
+        elif prev:
+            d = prev["newEnd"] - prev["end"]
+            for k in range(i, j + 1):
+                segments[k]["newStart"] = segments[k]["start"] + d
+                segments[k]["newEnd"] = segments[k]["end"] + d
+        else:
+            for k in range(i, j + 1):
+                segments[k]["newStart"] = segments[k]["start"]
+                segments[k]["newEnd"] = segments[k]["end"]
+        i = j + 1
+
+
+def _enforce_monotonic(segments):
+    MIN_DUR = 0.30
+    prev_end = 0.0
+    for seg in segments:
+        ns = seg.get("newStart")
+        if ns is None or ns < prev_end:
+            seg["newStart"] = prev_end
+        orig_dur = max(seg["end"] - seg["start"], MIN_DUR)
+        ne = seg.get("newEnd")
+        if ne is None or ne <= seg["newStart"]:
+            seg["newEnd"] = seg["newStart"] + orig_dur
+        if seg["newEnd"] - seg["newStart"] < MIN_DUR:
+            seg["newEnd"] = seg["newStart"] + MIN_DUR
+        prev_end = seg["newEnd"]
+
+
+# ---------------- translation ----------------
+
+def translate_texts(texts, src_iso, tgt_iso, log, on_progress):
+    tr, tok = get_nllb(log)
+    src = FLORES.get(src_iso, "eng_Latn")
+    tgt = FLORES.get(tgt_iso, "hin_Deva")
+    tok.src_lang = src
+
+    out = []
+    BATCH = 16
+    beam = 4 if DEVICE == "cuda" else 2
+    total = len(texts)
+    for i in range(0, total, BATCH):
+        batch = texts[i:i + BATCH]
+        src_tokens = [tok.convert_ids_to_tokens(tok.encode(t)) for t in batch]
+        results = tr.translate_batch(
+            src_tokens,
+            target_prefix=[[tgt]] * len(batch),
+            beam_size=beam,
+            max_decoding_length=256,
+        )
+        for r in results:
+            hyp = r.hypotheses[0]
+            if hyp and hyp[0] == tgt:
+                hyp = hyp[1:]
+            out.append(tok.decode(tok.convert_tokens_to_ids(hyp), skip_special_tokens=True).strip())
+        on_progress(min(i + BATCH, total), total)
+    return out
+
+
+# ---------------- job management ----------------
+
+JOBS = {}
+_job_lock = threading.Lock()  # one heavy job at a time
+
+
+def run_job(job_id, audio_path, srt_text, src_lang, tgt_lang, model_size):
+    job = JOBS[job_id]
+
+    def log(msg):
+        job["log"].append(f"[{time.strftime('%H:%M:%S')}] {msg}")
+
+    def prog(p, msg=None):
+        job["progress"] = round(p, 1)
+        if msg:
+            job["message"] = msg
+
+    try:
+        with _job_lock:
+            job["status"] = "running"
+            prog(2, "Parsing subtitles…")
+            segments = parse_subtitle(srt_text)
+            if not segments:
+                raise ValueError("No cues found in the subtitle file")
+            log(f"Parsed {len(segments)} subtitle segments.")
+
+            prog(4, "Loading Whisper model (first run downloads it)…")
+            model = get_whisper(model_size, log)
+
+            prog(12, "Transcribing audio…")
+            lang_arg = None if src_lang == "auto" else src_lang
+            gen, info = model.transcribe(
+                audio_path,
+                language=lang_arg,
+                word_timestamps=True,
+                vad_filter=True,
+                temperature=0.0,
+                beam_size=5,
+            )
+            duration = max(getattr(info, "duration", 0) or 0, 0.001)
+            detected = getattr(info, "language", None) or (src_lang if src_lang != "auto" else "en")
+            log(f"Audio language: {detected} "
+                f"(p={getattr(info, 'language_probability', 0):.2f}), duration {duration:.0f}s.")
+
+            words = []
+            transcript_parts = []
+            for seg in gen:
+                transcript_parts.append(seg.text.strip())
+                for w in (seg.words or []):
+                    words.append({"word": w.word, "start": w.start, "end": w.end})
+                prog(12 + min(seg.end / duration, 1.0) * 43,
+                     f"Transcribing… {min(seg.end, duration):.0f}s / {duration:.0f}s")
+            transcript = " ".join(transcript_parts)
+            log(f"Whisper returned {len(words)} words.")
+
+            prog(56, "Aligning subtitle segments to audio…")
+            stats = align_segments(segments, words)
+            log(f"Aligned {stats['matchedSegments']}/{stats['totalSegments']} segments directly "
+                f"(word match {stats['wordMatchRatio'] * 100:.0f}%); rest interpolated.")
+
+            prog(58, "Loading translation model (first run downloads it)…")
+            texts = [re.sub(r"\s*\n\s*", " ", s["text"]).strip() for s in segments]
+            translated = translate_texts(
+                texts, detected, tgt_lang, log,
+                lambda done, total: prog(60 + done / total * 38, f"Translating… {done}/{total} lines"),
+            )
+            for s, t in zip(segments, translated):
+                s["translated"] = t
+
+            job["result"] = {
+                "language": detected,
+                "stats": stats,
+                "segments": segments,
+                "transcript": transcript,
+            }
+            prog(100, "Done ✔")
+            job["status"] = "done"
+            log("Done.")
+    except Exception as e:
+        job["status"] = "error"
+        job["error"] = str(e)
+        log(f"ERROR: {e}")
+    finally:
+        try:
+            os.unlink(audio_path)
+        except OSError:
+            pass
+
+
+# ---------------- FastAPI app ----------------
+
+app = FastAPI(title="SubSync Translate (local)")
+
+
+@app.get("/api/info")
+def api_info():
+    return {"device": DEVICE, "cuda": CUDA, "version": "1.0-local"}
+
+
+@app.post("/api/jobs")
+async def create_job(
+    audio: UploadFile = File(...),
+    srt: UploadFile = File(...),
+    src_lang: str = Form("auto"),
+    tgt_lang: str = Form("hi"),
+    model_size: str = Form("large-v3"),
+):
+    suffix = os.path.splitext(audio.filename or "audio.bin")[1] or ".bin"
+    fd, tmp_path = tempfile.mkstemp(suffix=suffix, dir=str(BASE))
+    with os.fdopen(fd, "wb") as f:
+        while chunk := await audio.read(1 << 20):
+            f.write(chunk)
+
+    srt_text = (await srt.read()).decode("utf-8-sig", errors="replace")
+
+    if model_size not in {"large-v3", "large-v3-turbo", "medium", "small", "base"}:
+        model_size = "large-v3"
+
+    job_id = uuid.uuid4().hex[:12]
+    JOBS[job_id] = {"status": "queued", "progress": 0, "message": "Queued…",
+                    "log": [], "result": None, "error": None}
+    threading.Thread(
+        target=run_job,
+        args=(job_id, tmp_path, srt_text, src_lang, tgt_lang, model_size),
+        daemon=True,
+    ).start()
+    return {"id": job_id}
+
+
+@app.get("/api/jobs/{job_id}")
+def get_job(job_id: str):
+    job = JOBS.get(job_id)
+    if not job:
+        return JSONResponse({"error": "unknown job"}, status_code=404)
+    return job
+
+
+app.mount("/", StaticFiles(directory=str(BASE / "static"), html=True), name="static")
+
+
+if __name__ == "__main__":
+    print(f"\n  SubSync Translate (local) — http://127.0.0.1:{PORT}")
+    print(f"  Device: {DEVICE.upper()}{' (' + str(ctranslate2.get_cuda_device_count()) + ' GPU)' if CUDA else ''}\n")
+    if os.environ.get("OPEN_BROWSER") == "1":
+        threading.Timer(1.5, lambda: webbrowser.open(f"http://127.0.0.1:{PORT}")).start()
+    uvicorn.run(app, host="127.0.0.1", port=PORT, log_level="warning")

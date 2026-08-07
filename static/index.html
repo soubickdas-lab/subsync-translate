@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SubSync Translate — Local (Whisper + NLLB)</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎙️</text></svg>">
+<style>
+:root {
+  --bg:#0b0e14; --card:#131824; --card2:#1a2132; --border:#26304a;
+  --text:#e8ecf5; --muted:#8b96ad; --accent:#7c5cff; --accent2:#4dd0e1;
+  --ok:#3ddc84; --warn:#ffb74d; --err:#ff6b6b; --radius:14px; font-size:15px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:radial-gradient(1200px 600px at 80% -10%,#1c1440 0%,var(--bg) 55%) fixed,var(--bg);color:var(--text);font-family:"Segoe UI",system-ui,sans-serif;min-height:100vh}
+.topbar{display:flex;align-items:center;justify-content:space-between;padding:22px 28px;max-width:1100px;margin:0 auto}
+.brand{display:flex;gap:14px;align-items:center}
+.brand-icon{font-size:2.2rem}
+.brand h1{font-size:1.35rem}
+.brand p{color:var(--muted);font-size:.85rem;margin-top:2px}
+.pill{border:1px solid var(--border);color:var(--muted);padding:8px 14px;border-radius:10px;font-size:.8rem}
+.pill.gpu{border-color:var(--ok);color:var(--ok)}
+main{max-width:1100px;margin:0 auto;padding:0 28px 60px;display:flex;flex-direction:column;gap:18px}
+.card{background:linear-gradient(180deg,var(--card) 0%,#10141f 100%);border:1px solid var(--border);border-radius:var(--radius);padding:22px 24px}
+.card h2{font-size:1.02rem;display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.step{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#0b0e14;width:24px;height:24px;border-radius:8px;display:inline-flex;align-items:center;justify-content:center;font-size:.8rem;font-weight:700;flex:none}
+.hint{color:var(--muted);font-size:.86rem;line-height:1.5;margin-bottom:12px}
+.badge{font-size:.72rem;padding:3px 10px;border-radius:20px;border:1px solid var(--border);color:var(--muted);font-weight:600}
+.badge.ok{border-color:var(--ok);color:var(--ok)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+@media (max-width:860px){.grid2,.grid3{grid-template-columns:1fr}}
+.drop{border:2px dashed var(--border);border-radius:var(--radius);padding:26px 18px;text-align:center;cursor:pointer;transition:.2s;background:rgba(255,255,255,.015)}
+.drop:hover,.drop.over{border-color:var(--accent);background:rgba(124,92,255,.06)}
+.drop.filled{border-style:solid;border-color:var(--ok)}
+.drop-icon{font-size:1.9rem;margin-bottom:6px}
+.drop-title{font-weight:600}
+.drop-sub{color:var(--muted);font-size:.78rem;margin-top:4px}
+.file-chip{margin-top:12px;display:inline-block;background:var(--card2);border:1px solid var(--ok);color:var(--ok);font-size:.8rem;padding:5px 12px;border-radius:20px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.field{display:flex;flex-direction:column;gap:6px}
+.field>span{font-size:.85rem;font-weight:600}
+.field small{color:var(--muted);font-size:.72rem}
+select{background:var(--card2);border:1px solid var(--border);color:var(--text);padding:10px 12px;border-radius:10px;font-size:.9rem;outline:none;cursor:pointer}
+select:focus{border-color:var(--accent)}
+.btn{border:1px solid var(--border);background:var(--card2);color:var(--text);padding:11px 20px;border-radius:10px;font-size:.92rem;font-weight:600;cursor:pointer;transition:.2s}
+.btn:hover:not(:disabled){border-color:var(--accent);transform:translateY(-1px)}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn.primary{background:linear-gradient(135deg,var(--accent),#5b3df5);border-color:transparent;color:#fff}
+.btn.primary:hover:not(:disabled){filter:brightness(1.12)}
+.btn.ghost{background:transparent}
+.btn.big{width:100%;padding:15px;font-size:1.02rem}
+.run-card{display:flex;flex-direction:column;gap:14px}
+.progress-wrap{display:flex;flex-direction:column;gap:8px}
+.progress{height:8px;background:var(--card2);border-radius:10px;overflow:hidden}
+.bar{height:100%;width:0%;background:linear-gradient(90deg,var(--accent),var(--accent2));border-radius:10px;transition:width .35s ease}
+.status{color:var(--muted);font-size:.85rem}
+.log{background:#0a0d14;border:1px solid var(--border);border-radius:10px;padding:12px 14px;font-family:ui-monospace,Consolas,monospace;font-size:.78rem;color:var(--muted);max-height:180px;overflow-y:auto;white-space:pre-wrap;line-height:1.55}
+.log .err{color:var(--err)}
+.table-wrap{overflow:auto;max-height:480px;border:1px solid var(--border);border-radius:10px}
+table{width:100%;border-collapse:collapse;font-size:.84rem}
+thead th{position:sticky;top:0;background:var(--card2);text-align:left;padding:10px 12px;border-bottom:1px solid var(--border);z-index:1}
+tbody td{padding:9px 12px;border-bottom:1px solid #1d2436;vertical-align:top}
+tbody tr:hover{background:rgba(124,92,255,.05)}
+td.num{color:var(--muted);width:40px}
+td.time{font-family:ui-monospace,Consolas,monospace;font-size:.74rem;color:var(--muted);white-space:nowrap}
+td.time .new{color:var(--accent2)}
+td.time s{opacity:.55}
+td.orig{color:var(--muted);max-width:320px}
+td.trans{max-width:320px}
+td.trans[contenteditable]:focus{outline:1px solid var(--accent);border-radius:6px;background:rgba(124,92,255,.08)}
+td.unmatched{border-left:3px solid var(--warn)}
+.dl-row{display:flex;gap:12px;margin-top:16px;flex-wrap:wrap}
+footer{text-align:center;color:var(--muted);font-size:.78rem;margin-top:10px}
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-icon">🎙️</span>
+    <div>
+      <h1>SubSync Translate <span style="color:var(--ok);font-size:.8rem">LOCAL</span></h1>
+      <p>Whisper large-v3 + NLLB-200 · sab kuch aapke PC par · no API, no internet needed</p>
+    </div>
+  </div>
+  <span class="pill" id="devicePill">checking…</span>
+</header>
+
+<main>
+
+  <section class="card">
+    <h2><span class="step">1</span> Upload Files</h2>
+    <div class="grid2">
+      <div class="drop" id="dropAudio">
+        <input type="file" id="audioFile" accept="audio/*,video/*,.mp3,.wav,.m4a,.mp4,.mkv,.aac,.ogg,.flac,.webm,.opus" hidden>
+        <div class="drop-icon">🎵</div>
+        <div class="drop-title">Audio file</div>
+        <div class="drop-sub">mp3 · wav · m4a · flac · mp4 · mkv … (koi size limit nahi — local hai)</div>
+        <div class="file-chip" id="audioChip" hidden></div>
+      </div>
+      <div class="drop" id="dropSrt">
+        <input type="file" id="srtFile" accept=".srt,.vtt,text/plain" hidden>
+        <div class="drop-icon">💬</div>
+        <div class="drop-title">Subtitle file (.srt / .vtt)</div>
+        <div class="drop-sub">Iske breaks exactly preserve honge</div>
+        <div class="file-chip" id="srtChip" hidden></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2><span class="step">2</span> Options</h2>
+    <div class="grid3">
+      <label class="field">
+        <span>Audio language</span>
+        <select id="srcLang"></select>
+        <small>Auto-detect = Whisper khud pehchan lega</small>
+      </label>
+      <label class="field">
+        <span>Whisper model</span>
+        <select id="whisperModel">
+          <option value="large-v3" selected>large-v3 (best quality)</option>
+          <option value="large-v3-turbo">large-v3-turbo (fast, ~same quality)</option>
+          <option value="medium">medium</option>
+          <option value="small">small</option>
+          <option value="base">base (testing only)</option>
+        </select>
+        <small>Pehli baar model download hota hai (large-v3 ≈ 3 GB)</small>
+      </label>
+      <label class="field">
+        <span>Translate to</span>
+        <select id="tgtLang"></select>
+        <small>NLLB-200 se local translation</small>
+      </label>
+    </div>
+  </section>
+
+  <section class="card run-card">
+    <button class="btn primary big" id="runBtn" disabled>⚡ Transcribe · Re-time · Translate (100% local)</button>
+    <div class="progress-wrap" id="progressWrap" hidden>
+      <div class="progress"><div class="bar" id="bar"></div></div>
+      <div class="status" id="status"></div>
+    </div>
+    <div class="log" id="log" hidden></div>
+  </section>
+
+  <section class="card" id="resultCard" hidden>
+    <h2><span class="step">3</span> Result
+      <span class="badge" id="detectedBadge" hidden></span>
+      <span class="badge ok" id="matchBadge" hidden></span>
+    </h2>
+    <p class="hint">Translated cells <b>editable</b> hain — download se pehle koi bhi line theek kar lo.</p>
+    <div class="table-wrap">
+      <table id="resultTable">
+        <thead>
+          <tr><th>#</th><th>Timing (original → re-timed)</th><th>Original</th><th id="thTrans">Translated</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <div class="dl-row">
+      <button class="btn primary" id="dlTranslated">⬇ Translated SRT</button>
+      <button class="btn ghost" id="dlRetimed">⬇ Re-timed original SRT</button>
+      <button class="btn ghost" id="dlTranscript">⬇ Whisper transcript</button>
+    </div>
+  </section>
+
+  <footer>
+    <p>Sab processing aapke PC par hoti hai — audio/subtitle kahin upload nahi hote. Models sirf pehli baar download hote hain.</p>
+  </footer>
+</main>
+
+<script>
+"use strict";
+
+const SRC_LANGS = [
+  ["auto","🔍 Auto-detect"],["en","English"],["hi","Hindi"],["ja","Japanese"],["ko","Korean"],
+  ["zh","Chinese"],["es","Spanish"],["fr","French"],["de","German"],["it","Italian"],
+  ["pt","Portuguese"],["ru","Russian"],["ar","Arabic"],["bn","Bengali"],["ur","Urdu"],
+  ["ta","Tamil"],["te","Telugu"],["ml","Malayalam"],["mr","Marathi"],["gu","Gujarati"],
+  ["kn","Kannada"],["pa","Punjabi"],["id","Indonesian"],["vi","Vietnamese"],["th","Thai"],
+  ["tr","Turkish"],["nl","Dutch"],["pl","Polish"],["uk","Ukrainian"],["fa","Persian"],
+  ["ms","Malay"],["fil","Filipino"]
+];
+const TGT_LANGS = [
+  ["hi","Hindi"],["en","English"],["bn","Bengali"],["ta","Tamil"],["te","Telugu"],
+  ["ml","Malayalam"],["mr","Marathi"],["gu","Gujarati"],["kn","Kannada"],["pa","Punjabi"],
+  ["ur","Urdu"],["ne","Nepali"],["si","Sinhala"],["es","Spanish"],["fr","French"],
+  ["de","German"],["it","Italian"],["pt","Portuguese"],["ru","Russian"],["ja","Japanese"],
+  ["ko","Korean"],["zh-CN","Chinese (Simplified)"],["zh-TW","Chinese (Traditional)"],
+  ["ar","Arabic"],["id","Indonesian"],["vi","Vietnamese"],["th","Thai"],["tr","Turkish"],
+  ["nl","Dutch"],["pl","Polish"],["uk","Ukrainian"],["fa","Persian"],["ms","Malay"],
+  ["fil","Filipino"],["sw","Swahili"]
+];
+const LANG_NAMES = Object.fromEntries([...SRC_LANGS,...TGT_LANGS].map(([c,n])=>[c,n.replace("🔍 ","")]));
+
+const $ = id => document.getElementById(id);
+const state = { audio:null, srtFile:null, segments:null, transcript:"" };
+
+function fillSelect(sel, list, saved){
+  sel.innerHTML="";
+  for (const [code,name] of list){
+    const o=document.createElement("option"); o.value=code; o.textContent=name; sel.appendChild(o);
+  }
+  if (saved && list.some(([c])=>c===saved)) sel.value=saved;
+}
+fillSelect($("srcLang"), SRC_LANGS, localStorage.getItem("ssl_src")||"auto");
+fillSelect($("tgtLang"), TGT_LANGS, localStorage.getItem("ssl_tgt")||"hi");
+$("whisperModel").value = localStorage.getItem("ssl_model")||"large-v3";
+$("srcLang").onchange=()=>localStorage.setItem("ssl_src",$("srcLang").value);
+$("tgtLang").onchange=()=>localStorage.setItem("ssl_tgt",$("tgtLang").value);
+$("whisperModel").onchange=()=>localStorage.setItem("ssl_model",$("whisperModel").value);
+
+fetch("/api/info").then(r=>r.json()).then(d=>{
+  const p=$("devicePill");
+  p.textContent = d.cuda ? "⚡ GPU (CUDA)" : "🖥 CPU mode";
+  p.classList.toggle("gpu", d.cuda);
+}).catch(()=>{ $("devicePill").textContent="server?"; });
+
+function wireDrop(zone, input, onFile){
+  zone.addEventListener("click",()=>input.click());
+  input.addEventListener("change",()=>input.files[0]&&onFile(input.files[0]));
+  zone.addEventListener("dragover",e=>{e.preventDefault();zone.classList.add("over");});
+  zone.addEventListener("dragleave",()=>zone.classList.remove("over"));
+  zone.addEventListener("drop",e=>{e.preventDefault();zone.classList.remove("over");
+    if(e.dataTransfer.files[0]) onFile(e.dataTransfer.files[0]);});
+}
+const fmtBytes = n => n>1048576 ? (n/1048576).toFixed(1)+" MB" : (n/1024).toFixed(0)+" KB";
+
+wireDrop($("dropAudio"), $("audioFile"), f=>{
+  state.audio=f;
+  $("audioChip").hidden=false;
+  $("audioChip").textContent=`${f.name} (${fmtBytes(f.size)})`;
+  $("dropAudio").classList.add("filled");
+  updateRun();
+});
+wireDrop($("dropSrt"), $("srtFile"), f=>{
+  state.srtFile=f;
+  $("srtChip").hidden=false;
+  $("srtChip").textContent=f.name;
+  $("dropSrt").classList.add("filled");
+  updateRun();
+});
+function updateRun(){ $("runBtn").disabled = !(state.audio && state.srtFile); }
+
+function log(msg, cls=""){
+  const el=$("log"); el.hidden=false;
+  const d=document.createElement("div"); if(cls)d.className=cls; d.textContent=msg;
+  el.appendChild(d); el.scrollTop=el.scrollHeight;
+}
+function setProgress(pct,msg){
+  $("progressWrap").hidden=false;
+  $("bar").style.width=Math.min(100,pct)+"%";
+  if(msg)$("status").textContent=msg;
+}
+
+function toSrtTime(sec){
+  sec=Math.max(0,sec);
+  const h=Math.floor(sec/3600),m=Math.floor(sec%3600/60),s=Math.floor(sec%60),
+        ms=Math.round((sec-Math.floor(sec))*1000);
+  const p=(n,l=2)=>String(n).padStart(l,"0");
+  return `${p(h)}:${p(m)}:${p(s)},${p(ms,3)}`;
+}
+function buildSrt(segments, field){
+  return segments.map((seg,i)=>
+    `${i+1}\n${toSrtTime(seg.newStart)} --> ${toSrtTime(seg.newEnd)}\n${(seg[field]||seg.text).trim()}\n`
+  ).join("\n");
+}
+
+let seenLog = 0;
+$("runBtn").addEventListener("click", async ()=>{
+  $("runBtn").disabled=true;
+  $("resultCard").hidden=true;
+  $("log").innerHTML=""; seenLog=0;
+  setProgress(1,"Uploading files to local server…");
+  try{
+    const fd=new FormData();
+    fd.append("audio", state.audio);
+    fd.append("srt", state.srtFile);
+    fd.append("src_lang", $("srcLang").value);
+    fd.append("tgt_lang", $("tgtLang").value);
+    fd.append("model_size", $("whisperModel").value);
+    const res=await fetch("/api/jobs",{method:"POST",body:fd});
+    if(!res.ok) throw new Error("Server error: "+await res.text());
+    const {id}=await res.json();
+    await pollJob(id);
+  }catch(err){
+    log("ERROR: "+err.message,"err");
+    setProgress(0,"Failed — see log");
+  }finally{
+    $("runBtn").disabled=false; updateRun();
+  }
+});
+
+async function pollJob(id){
+  while(true){
+    await new Promise(r=>setTimeout(r,900));
+    let job;
+    try{
+      const res=await fetch("/api/jobs/"+id);
+      job=await res.json();
+    }catch(e){ log("Server se connection tut gaya — retry…","err"); continue; }
+    for(; seenLog<job.log.length; seenLog++) log(job.log[seenLog]);
+    setProgress(job.progress, job.message);
+    if(job.status==="done"){ showResult(job.result); return; }
+    if(job.status==="error") throw new Error(job.error||"processing failed");
+  }
+}
+
+function showResult(result){
+  state.segments=result.segments;
+  state.transcript=result.transcript;
+  const tgt=$("tgtLang").value;
+  $("thTrans").textContent="Translated ("+(LANG_NAMES[tgt]||tgt)+")";
+  if(result.language){
+    $("detectedBadge").hidden=false;
+    $("detectedBadge").textContent="🔍 audio: "+result.language;
+  }
+  const st=result.stats;
+  $("matchBadge").hidden=false;
+  $("matchBadge").textContent=`⏱ ${st.matchedSegments}/${st.totalSegments} re-timed from audio`;
+
+  const tbody=$("resultTable").querySelector("tbody");
+  tbody.innerHTML="";
+  result.segments.forEach((seg,i)=>{
+    const tr=document.createElement("tr");
+    const tdN=document.createElement("td"); tdN.className="num"; tdN.textContent=i+1;
+    const tdT=document.createElement("td");
+    tdT.className="time"+(seg.matched?"":" unmatched");
+    tdT.innerHTML=`<s>${toSrtTime(seg.start)}</s><br><span class="new">${toSrtTime(seg.newStart)} → ${toSrtTime(seg.newEnd)}</span>`;
+    if(!seg.matched) tdT.title="Audio me match nahi mila — timing interpolate hui";
+    const tdO=document.createElement("td"); tdO.className="orig"; tdO.textContent=seg.text;
+    const tdX=document.createElement("td"); tdX.className="trans";
+    tdX.contentEditable="plaintext-only" in document.body ? "plaintext-only" : "true";
+    tdX.textContent=seg.translated;
+    tdX.addEventListener("input",()=>{ seg.translated=tdX.textContent; });
+    tr.append(tdN,tdT,tdO,tdX);
+    tbody.appendChild(tr);
+  });
+  $("resultCard").hidden=false;
+  $("resultCard").scrollIntoView({behavior:"smooth",block:"start"});
+}
+
+function download(name,content){
+  const blob=new Blob([content],{type:"text/plain;charset=utf-8"});
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(blob); a.download=name; a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href),5000);
+}
+const baseName=()=> (state.srtFile?state.srtFile.name:"subtitles").replace(/\.(srt|vtt)$/i,"");
+
+$("dlTranslated").addEventListener("click",()=>{
+  if(state.segments) download(`${baseName()}.${$("tgtLang").value}.srt`, buildSrt(state.segments,"translated"));
+});
+$("dlRetimed").addEventListener("click",()=>{
+  if(state.segments) download(`${baseName()}.retimed.srt`, buildSrt(state.segments,"text"));
+});
+$("dlTranscript").addEventListener("click",()=>{
+  if(state.transcript) download(`${baseName()}.transcript.txt`, state.transcript);
+});
+</script>
+</body>
+</html>
