@@ -18,4 +18,10 @@ if exist venv\.setup-ok (
 
 echo.
 echo Update complete! venv aur downloaded models safe hain.
+echo.
+for %%f in ("version *.txt") do set "VFILE=%%~nf"
+if defined VFILE (
+    echo Aapka current version: %VFILE%
+    echo Features aur changelog ke liye "%VFILE%.txt" file kholo.
+)
 pause
