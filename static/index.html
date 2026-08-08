@@ -20,6 +20,11 @@ body{background:radial-gradient(1200px 600px at 80% -10%,#1c1440 0%,var(--bg) 55
 .brand p{color:var(--muted);font-size:.85rem;margin-top:2px}
 .pill{border:1px solid var(--border);color:var(--muted);padding:8px 14px;border-radius:10px;font-size:.8rem}
 .pill.gpu{border-color:var(--ok);color:var(--ok)}
+.top-right{display:flex;flex-direction:column;align-items:flex-end;gap:6px}
+.stats-pill{display:flex;gap:10px;border:1px solid var(--border);padding:6px 12px;border-radius:10px;font-family:ui-monospace,Consolas,monospace;font-size:.72rem;color:var(--muted)}
+.stats-pill b{color:var(--text);font-weight:600}
+.stats-pill .hot b{color:var(--warn)}
+.stats-pill .crit b{color:var(--err)}
 main{max-width:1100px;margin:0 auto;padding:0 28px 60px;display:flex;flex-direction:column;gap:18px}
 .card{background:linear-gradient(180deg,var(--card) 0%,#10141f 100%);border:1px solid var(--border);border-radius:var(--radius);padding:22px 24px}
 .card h2{font-size:1.02rem;display:flex;align-items:center;gap:10px;margin-bottom:10px}
@@ -83,7 +88,15 @@ footer{text-align:center;color:var(--muted);font-size:.78rem;margin-top:10px}
       <p>Whisper large-v3 + NLLB-200 · sab kuch aapke PC par · no API, no internet needed</p>
     </div>
   </div>
-  <span class="pill" id="devicePill">checking…</span>
+  <div class="top-right">
+    <span class="pill" id="devicePill">checking…</span>
+    <div class="stats-pill" id="statsPill" hidden>
+      <span id="stCpu">CPU <b>–</b></span>
+      <span id="stRam">RAM <b>–</b></span>
+      <span id="stGpu" hidden>GPU <b>–</b></span>
+      <span id="stVram" hidden>VRAM <b>–</b></span>
+    </div>
+  </div>
 </header>
 
 <main>
@@ -216,6 +229,26 @@ fetch("/api/info").then(r=>r.json()).then(d=>{
   p.textContent = d.cuda ? "⚡ GPU (CUDA)" : "🖥 CPU mode";
   p.classList.toggle("gpu", d.cuda);
 }).catch(()=>{ $("devicePill").textContent="server?"; });
+
+// live CPU / RAM / GPU / VRAM stats (top right)
+function setStat(id, label, val){
+  const el=$(id);
+  if(val===null||val===undefined){ el.hidden=true; return; }
+  el.hidden=false;
+  el.innerHTML=`${label} <b>${Math.round(val)}%</b>`;
+  el.className = val>=90 ? "crit" : val>=75 ? "hot" : "";
+}
+async function pollStats(){
+  try{
+    const d=await (await fetch("/api/stats")).json();
+    $("statsPill").hidden=false;
+    setStat("stCpu","CPU",d.cpu);
+    setStat("stRam","RAM",d.ram);
+    setStat("stGpu","GPU",d.gpu);
+    setStat("stVram","VRAM",d.vram);
+  }catch(e){ $("statsPill").hidden=true; }
+}
+pollStats(); setInterval(pollStats, 2000);
 
 function wireDrop(zone, input, onFile){
   zone.addEventListener("click",()=>input.click());

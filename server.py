@@ -403,7 +403,46 @@ app = FastAPI(title="SubSync Translate (local)")
 
 @app.get("/api/info")
 def api_info():
-    return {"device": DEVICE, "cuda": CUDA, "version": "1.2-local"}
+    return {"device": DEVICE, "cuda": CUDA, "version": "1.3-local"}
+
+
+# ---- live system stats (CPU / RAM / GPU / VRAM, in %) ----
+
+_nvml = {"handle": None, "tried": False}
+
+
+def _gpu_stats():
+    if not _nvml["tried"]:
+        _nvml["tried"] = True
+        try:
+            import pynvml
+            pynvml.nvmlInit()
+            _nvml["handle"] = pynvml.nvmlDeviceGetHandleByIndex(0)
+            _nvml["mod"] = pynvml
+        except Exception:
+            _nvml["handle"] = None
+    h = _nvml["handle"]
+    if h is None:
+        return None, None
+    try:
+        pynvml = _nvml["mod"]
+        util = pynvml.nvmlDeviceGetUtilizationRates(h).gpu
+        mem = pynvml.nvmlDeviceGetMemoryInfo(h)
+        return util, round(mem.used / mem.total * 100, 1)
+    except Exception:
+        return None, None
+
+
+@app.get("/api/stats")
+def api_stats():
+    import psutil
+    gpu, vram = _gpu_stats()
+    return {
+        "cpu": psutil.cpu_percent(interval=None),
+        "ram": psutil.virtual_memory().percent,
+        "gpu": gpu,
+        "vram": vram,
+    }
 
 
 # ---- chunked upload (big files through Cloudflare's ~100 MB request limit) ----

@@ -1,11 +1,11 @@
 ==================================================
- SubSync Translate — VERSION 1.2
+ SubSync Translate — VERSION 1.3
  Release date: 08 August 2026
 ==================================================
 
 Ye file batati hai ki aapke paas konsa version installed hai.
 Naya update aane par is file ka naam badal jayega
-(version 1.3, version 1.4 ...) — update.bat chalane ke baad
+(version 1.4, version 1.5 ...) — update.bat chalane ke baad
 yahi file check karo.
 
 --------------------------------------------------
@@ -40,10 +40,18 @@ yahi file check karo.
     - update.bat       -> GitHub se latest version + current version dikhata hai
 13. Online mode bhi available (Groq API + browser):
     https://soubickdas-lab.github.io/subsync-translate/
+14. LIVE SYSTEM STATS — UI ke top-right me CPU / RAM / GPU / VRAM
+    usage % har 2 second update hota hai
+    (75%+ orange, 90%+ red)
 
 --------------------------------------------------
  CHANGELOG
 --------------------------------------------------
+[Version 1.3] - 08 Aug 2026
+  + UI top-right me live CPU / RAM / GPU / VRAM % (har 2 sec update)
+  + /api/stats endpoint (psutil + NVIDIA NVML)
+  + 75%+ pe orange, 90%+ pe red color warning
+
 [Version 1.2] - 08 Aug 2026
   + LIVE mode: Cloudflare Tunnel se https://manwhadub.aipoint.online
   + start-live.bat — server + tunnel + browser ek saath
