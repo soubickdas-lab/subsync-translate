@@ -267,15 +267,54 @@ function buildSrt(segments, field){
   ).join("\n");
 }
 
+// Cloudflare proxy ~100 MB request limit — badi files 25 MB chunks me jaati hain
+const CHUNK_SIZE = 25 * 1024 * 1024;
+const CHUNK_THRESHOLD = 30 * 1024 * 1024;
+
+async function uploadInChunks(file){
+  let fd = new FormData();
+  fd.append("filename", file.name);
+  let res = await fetch("/api/upload/init", {method:"POST", body:fd});
+  if(!res.ok) throw new Error("upload init failed: "+await res.text());
+  const {id} = await res.json();
+  const total = Math.ceil(file.size / CHUNK_SIZE);
+  for(let i=0; i<total; i++){
+    const blob = file.slice(i*CHUNK_SIZE, Math.min((i+1)*CHUNK_SIZE, file.size));
+    fd = new FormData();
+    fd.append("upload_id", id);
+    fd.append("index", i);
+    fd.append("chunk", blob, "chunk"+i);
+    let ok = false;
+    for(let attempt=0; attempt<3 && !ok; attempt++){
+      try{
+        res = await fetch("/api/upload/chunk", {method:"POST", body:fd});
+        ok = res.ok;
+        if(!ok && res.status !== 502 && res.status !== 504) throw new Error(await res.text());
+      }catch(e){
+        if(attempt===2) throw new Error(`chunk ${i+1}/${total} failed: ${e.message}`);
+        await new Promise(r=>setTimeout(r,2000));
+      }
+    }
+    setProgress(1 + (i+1)/total*9, `Uploading big file… ${i+1}/${total} chunks (${fmtBytes(Math.min((i+1)*CHUNK_SIZE,file.size))} / ${fmtBytes(file.size)})`);
+  }
+  return id;
+}
+
 let seenLog = 0;
 $("runBtn").addEventListener("click", async ()=>{
   $("runBtn").disabled=true;
   $("resultCard").hidden=true;
   $("log").innerHTML=""; seenLog=0;
-  setProgress(1,"Uploading files to local server…");
+  setProgress(1,"Uploading files to server…");
   try{
     const fd=new FormData();
-    fd.append("audio", state.audio);
+    if(state.audio.size > CHUNK_THRESHOLD){
+      log(`Badi file (${fmtBytes(state.audio.size)}) — chunked upload use ho raha hai…`);
+      const uploadId = await uploadInChunks(state.audio);
+      fd.append("upload_id", uploadId);
+    }else{
+      fd.append("audio", state.audio);
+    }
     fd.append("srt", state.srtFile);
     fd.append("src_lang", $("srcLang").value);
     fd.append("tgt_lang", $("tgtLang").value);

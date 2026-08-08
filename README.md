@@ -23,11 +23,28 @@ Two ways to use it:
 | File | Kya karta hai |
 |---|---|
 | `start-local.bat` | Server start + browser open (pehli baar setup bhi khud kar leta hai) |
+| `start-live.bat` | Local server + Cloudflare tunnel — tool internet pe live ho jata hai |
 | `setup.bat` | Manual setup (Python + dependencies) — normally zaroorat nahi |
-| `update.bat` | GitHub se latest version le aao (venv/models safe rehte hain) |
-| `server.py` | FastAPI backend — transcription, alignment, translation |
+| `update.bat` | GitHub se latest version le aao (venv/models safe rehte hain) + current version dikhata hai |
+| `server.py` | FastAPI backend — transcription, alignment, translation, chunked uploads |
 | `static/index.html` | Pura local frontend (single file) |
 | `requirements.txt` | Python dependencies |
+| `version X.Y.txt` | Current installed version + features + changelog |
+
+### 🌍 Live mode (Cloudflare Tunnel)
+
+`start-live.bat` chalane par tool aapke apne domain pe internet se accessible ho jata hai (server aapke PC pe hi chalta hai, sirf traffic Cloudflare ke through aata hai). Iske liye ek one-time setup chahiye:
+
+```
+winget install Cloudflare.cloudflared
+cloudflared tunnel login
+cloudflared tunnel create <tunnel-name>
+cloudflared tunnel route dns <tunnel-name> <your-subdomain.your-domain.com>
+```
+
+Phir `%USERPROFILE%\.cloudflared\<tunnel-name>.yml` me config banao (hostname → `http://localhost:8756`). `start-live.bat` me tunnel name/config apne hisaab se set hai.
+
+**Big files:** 30 MB+ ki audio/video files frontend khud 25 MB chunks me upload karta hai (retry ke saath), isliye Cloudflare ki ~100 MB request limit ke bawajood kitni bhi badi file bhej sakte ho.
 
 - **GPU**: NVIDIA GPU ho to CUDA pe chalta hai (float16), warna CPU (int8) pe — auto-detect, auto-fallback
 - **Transcription**: [faster-whisper](https://github.com/SYSTRAN/faster-whisper) large-v3 (ya turbo/medium/small/base), word timestamps ke saath — koi file-size limit nahi

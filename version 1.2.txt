@@ -1,11 +1,11 @@
-﻿==================================================
- SubSync Translate — VERSION 1.1
- Release date: 07 August 2026
+==================================================
+ SubSync Translate — VERSION 1.2
+ Release date: 08 August 2026
 ==================================================
 
 Ye file batati hai ki aapke paas konsa version installed hai.
 Naya update aane par is file ka naam badal jayega
-(version 1.2, version 1.3 ...) — update.bat chalane ke baad
+(version 1.3, version 1.4 ...) — update.bat chalane ke baad
 yahi file check karo.
 
 --------------------------------------------------
@@ -27,16 +27,31 @@ yahi file check karo.
 7. Downloads: translated SRT + re-timed original SRT + raw transcript
 8. Video files (mp4/mkv) bhi support — audio track khud nikal leta hai
 9. Koi file-size limit nahi (local hai)
-10. One-click Windows setup:
-    - start-local.bat  -> server start + browser open (setup bhi khud)
+10. LIVE mode (Cloudflare Tunnel): apna local server internet pe
+    https://manwhadub.aipoint.online se accessible
+    - start-live.bat -> server + tunnel + browser, sab ek click me
+11. BIG FILE upload: 30 MB+ ki files apne aap 25 MB chunks me
+    upload hoti hain — Cloudflare ki 100 MB limit ka koi issue nahi,
+    kitni bhi badi file bhejo
+12. One-click Windows setup:
+    - start-local.bat  -> sirf local (server + browser)
+    - start-live.bat   -> local + live URL (Cloudflare tunnel)
     - setup.bat        -> manual setup
-    - update.bat       -> GitHub se latest version
-11. Online mode bhi available (Groq API + browser):
+    - update.bat       -> GitHub se latest version + current version dikhata hai
+13. Online mode bhi available (Groq API + browser):
     https://soubickdas-lab.github.io/subsync-translate/
 
 --------------------------------------------------
  CHANGELOG
 --------------------------------------------------
+[Version 1.2] - 08 Aug 2026
+  + LIVE mode: Cloudflare Tunnel se https://manwhadub.aipoint.online
+  + start-live.bat — server + tunnel + browser ek saath
+  + Chunked BIG FILE upload (25 MB chunks, retry ke saath) —
+    Cloudflare ke through bhi badi files upload ho sakti hain
+  + /api/upload/init + /api/upload/chunk endpoints
+  + /api/info ab version dikhata hai (1.2-local)
+
 [Version 1.1] - 07 Aug 2026
   + Fully LOCAL mode add hua (no API): server.py + static/index.html
   + faster-whisper large-v3 GPU (CUDA float16) / CPU (int8) auto-fallback
@@ -44,7 +59,7 @@ yahi file check karo.
   + start-local.bat / setup.bat / update.bat
   + Temp uploads ab tmp/ folder me jaate hain (repo clean)
   + CUDA DLL fix: pip wale nvidia libraries PATH me auto-add
-  + Version txt file system (ye file) — update.bat ab version dikhata hai
+  + Version txt file system — update.bat ab version dikhata hai
 
 [Version 1.0] - 07 Aug 2026
   + Pehla release: browser-based tool (Groq API + Whisper large-v3)

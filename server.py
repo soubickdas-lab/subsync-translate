@@ -403,24 +403,68 @@ app = FastAPI(title="SubSync Translate (local)")
 
 @app.get("/api/info")
 def api_info():
-    return {"device": DEVICE, "cuda": CUDA, "version": "1.0-local"}
+    return {"device": DEVICE, "cuda": CUDA, "version": "1.2-local"}
+
+
+# ---- chunked upload (big files through Cloudflare's ~100 MB request limit) ----
+
+UPLOADS = {}  # id -> {"path": str, "next": int}
+
+
+@app.post("/api/upload/init")
+def upload_init(filename: str = Form("audio.bin")):
+    tmp_dir = BASE / "tmp"
+    tmp_dir.mkdir(exist_ok=True)
+    suffix = os.path.splitext(filename)[1] or ".bin"
+    fd, tmp_path = tempfile.mkstemp(suffix=suffix, dir=str(tmp_dir))
+    os.close(fd)
+    uid = uuid.uuid4().hex[:16]
+    UPLOADS[uid] = {"path": tmp_path, "next": 0}
+    return {"id": uid}
+
+
+@app.post("/api/upload/chunk")
+async def upload_chunk(
+    upload_id: str = Form(...),
+    index: int = Form(...),
+    chunk: UploadFile = File(...),
+):
+    up = UPLOADS.get(upload_id)
+    if not up:
+        return JSONResponse({"error": "unknown upload"}, status_code=404)
+    if index != up["next"]:
+        return JSONResponse({"error": f"expected chunk {up['next']}, got {index}"}, status_code=409)
+    with open(up["path"], "ab") as f:
+        while data := await chunk.read(1 << 20):
+            f.write(data)
+    up["next"] += 1
+    return {"ok": True, "received": up["next"]}
 
 
 @app.post("/api/jobs")
 async def create_job(
-    audio: UploadFile = File(...),
+    audio: UploadFile = File(None),
     srt: UploadFile = File(...),
     src_lang: str = Form("auto"),
     tgt_lang: str = Form("hi"),
     model_size: str = Form("large-v3"),
+    upload_id: str = Form(None),
 ):
-    suffix = os.path.splitext(audio.filename or "audio.bin")[1] or ".bin"
-    tmp_dir = BASE / "tmp"
-    tmp_dir.mkdir(exist_ok=True)
-    fd, tmp_path = tempfile.mkstemp(suffix=suffix, dir=str(tmp_dir))
-    with os.fdopen(fd, "wb") as f:
-        while chunk := await audio.read(1 << 20):
-            f.write(chunk)
+    if upload_id:
+        up = UPLOADS.pop(upload_id, None)
+        if not up:
+            return JSONResponse({"error": "unknown upload_id"}, status_code=404)
+        tmp_path = up["path"]
+    elif audio is not None:
+        suffix = os.path.splitext(audio.filename or "audio.bin")[1] or ".bin"
+        tmp_dir = BASE / "tmp"
+        tmp_dir.mkdir(exist_ok=True)
+        fd, tmp_path = tempfile.mkstemp(suffix=suffix, dir=str(tmp_dir))
+        with os.fdopen(fd, "wb") as f:
+            while chunk := await audio.read(1 << 20):
+                f.write(chunk)
+    else:
+        return JSONResponse({"error": "no audio provided"}, status_code=422)
 
     srt_text = (await srt.read()).decode("utf-8-sig", errors="replace")
 
