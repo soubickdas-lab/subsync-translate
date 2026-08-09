@@ -45,9 +45,10 @@ def _add_cuda_dll_dirs():
 _add_cuda_dll_dirs()
 
 import ctranslate2  # noqa: E402
+import requests  # noqa: E402
 import uvicorn  # noqa: E402
-from fastapi import FastAPI, File, Form, UploadFile  # noqa: E402
-from fastapi.responses import JSONResponse  # noqa: E402
+from fastapi import FastAPI, File, Form, Request, UploadFile  # noqa: E402
+from fastapi.responses import FileResponse, JSONResponse  # noqa: E402
 from fastapi.staticfiles import StaticFiles  # noqa: E402
 
 PORT = 8756
@@ -307,13 +308,151 @@ def translate_texts(texts, src_iso, tgt_iso, log, on_progress):
     return out
 
 
+# ---------------- DNS fallback (kuch ISP DNS kuch domains resolve nahi karte) ----------------
+
+import socket  # noqa: E402
+
+_orig_getaddrinfo = socket.getaddrinfo
+_doh_cache = {}
+
+
+def _doh_resolve(host):
+    """Resolve via DNS-over-HTTPS (IP-direct endpoints, system DNS bypass)."""
+    if host in _doh_cache:
+        return _doh_cache[host]
+    endpoints = [
+        ("https://8.8.8.8/resolve", {}),
+        ("https://1.1.1.1/dns-query", {"accept": "application/dns-json"}),
+    ]
+    for url, headers in endpoints:
+        try:
+            r = requests.get(url, params={"name": host, "type": "A"},
+                             headers=headers, timeout=8)
+            for ans in r.json().get("Answer", []):
+                if ans.get("type") == 1:
+                    _doh_cache[host] = ans["data"]
+                    return ans["data"]
+        except Exception:
+            continue
+    return None
+
+
+def _patched_getaddrinfo(host, *args, **kwargs):
+    try:
+        return _orig_getaddrinfo(host, *args, **kwargs)
+    except socket.gaierror:
+        if isinstance(host, str) and not host.replace(".", "").isdigit():
+            ip = _doh_resolve(host)
+            if ip:
+                return _orig_getaddrinfo(ip, *args, **kwargs)
+        raise
+
+
+socket.getaddrinfo = _patched_getaddrinfo
+
+# ---------------- TTS dubbing (ai33.pro / OpenSpeaker) ----------------
+
+AI33 = "https://api.ai33.pro"
+
+# target UI code -> whisper language code (for re-transcribing the dubbed audio)
+WHISPER_CODE = {"zh-CN": "zh", "zh-TW": "zh", "fil": "tl"}
+
+
+def tts_generate(job_id, segments, tts, log, prog):
+    """Generate dubbed audio from translated segments via ai33.pro, download it."""
+    text = "\n".join(s["translated"] for s in segments)
+    log(f"TTS request bhej rahe hain ({len(text)} chars, voice: {tts['voice']})…")
+    r = requests.post(
+        f"{AI33}/v3/text-to-speech",
+        headers={"xi-api-key": tts["key"]},
+        data={
+            "text": text,
+            "voice_id": tts["voice"],
+            "speed": tts.get("speed", "1"),
+            "with_transcript": "true",
+            "file_name": f"subsync_{job_id}",
+        },
+        timeout=120,
+    )
+    d = r.json()
+    if not d.get("success"):
+        raise RuntimeError(f"TTS request failed ({r.status_code}): {json.dumps(d)[:300]}")
+    task_id = d["task_id"]
+    log(f"TTS task bana: {task_id} — audio generate ho raha hai…")
+
+    deadline = time.time() + 30 * 60
+    while True:
+        time.sleep(5)
+        if time.time() > deadline:
+            raise RuntimeError("TTS timeout (30 min)")
+        t = requests.get(f"{AI33}/v1/task/{task_id}",
+                         headers={"xi-api-key": tts["key"]}, timeout=30).json()
+        status = t.get("status")
+        p = t.get("progress") or 0
+        prog(70 + p * 0.12, f"TTS audio ban raha hai… {p}%")
+        if status == "done":
+            break
+        if status == "error":
+            raise RuntimeError("TTS failed: " + str(t.get("error_message")))
+
+    meta = t.get("metadata") or {}
+    audio_url = meta.get("audio_url")
+    if not audio_url:
+        raise RuntimeError("TTS done but no audio_url in metadata")
+
+    out_dir = BASE / "outputs"
+    out_dir.mkdir(exist_ok=True)
+    ext = os.path.splitext(audio_url.split("?")[0])[1] or ".mp3"
+    out_path = out_dir / f"{job_id}{ext}"
+    prog(83, "Dubbed audio download ho raha hai…")
+    with requests.get(audio_url, stream=True, timeout=300) as resp:
+        resp.raise_for_status()
+        with open(out_path, "wb") as f:
+            for chunk in resp.iter_content(1 << 20):
+                f.write(chunk)
+    log(f"Dubbed audio mila: {out_path.name} ({out_path.stat().st_size // 1024} KB)")
+    return out_path, meta
+
+
+def align_dub(segments, model, audio_path, tgt_lang, log, prog):
+    """Transcribe the dubbed audio locally and re-time the translated segments to it."""
+    wcode = WHISPER_CODE.get(tgt_lang, tgt_lang.split("-")[0])
+    prog(85, "Dubbed audio transcribe ho raha hai (naye SRT timings ke liye)…")
+    try:
+        gen, info = model.transcribe(str(audio_path), language=wcode,
+                                     word_timestamps=True, beam_size=5)
+    except ValueError:
+        gen, info = model.transcribe(str(audio_path), language=None,
+                                     word_timestamps=True, beam_size=5)
+    duration = max(getattr(info, "duration", 0) or 0, 0.001)
+    words = []
+    for seg in gen:
+        for w in (seg.words or []):
+            words.append({"word": w.word, "start": w.start, "end": w.end})
+        prog(85 + min(seg.end / duration, 1.0) * 11,
+             f"Dubbed audio transcribe… {min(seg.end, duration):.0f}s / {duration:.0f}s")
+    log(f"Dubbed audio: {len(words)} words, {duration:.0f}s.")
+
+    # align translated text against the dubbed audio's words
+    dub_segs = [{"start": s["newStart"], "end": s["newEnd"], "text": s["translated"]}
+                for s in segments]
+    stats = align_segments(dub_segs, words)
+    for s, d in zip(segments, dub_segs):
+        s["dubStart"] = d["newStart"]
+        s["dubEnd"] = d["newEnd"]
+        s["dubMatched"] = d["matched"]
+    log(f"Dubbed SRT: {stats['matchedSegments']}/{stats['totalSegments']} segments "
+        f"audio se timed (word match {stats['wordMatchRatio'] * 100:.0f}%).")
+    return stats, duration
+
+
 # ---------------- job management ----------------
 
 JOBS = {}
 _job_lock = threading.Lock()  # one heavy job at a time
 
 
-def run_job(job_id, audio_path, srt_text, src_lang, tgt_lang, model_size):
+def run_job(job_id, audio_path, srt_text, src_lang, tgt_lang, model_size, tts=None):
     job = JOBS[job_id]
 
     def log(msg):
@@ -369,18 +508,38 @@ def run_job(job_id, audio_path, srt_text, src_lang, tgt_lang, model_size):
 
             prog(58, "Loading translation model (first run downloads it)…")
             texts = [re.sub(r"\s*\n\s*", " ", s["text"]).strip() for s in segments]
+            translate_end = 68 if tts else 98
             translated = translate_texts(
                 texts, detected, tgt_lang, log,
-                lambda done, total: prog(60 + done / total * 38, f"Translating… {done}/{total} lines"),
+                lambda done, total: prog(60 + done / total * (translate_end - 60),
+                                         f"Translating… {done}/{total} lines"),
             )
             for s, t in zip(segments, translated):
                 s["translated"] = t
+
+            dub = None
+            if tts:
+                try:
+                    audio_out, meta = tts_generate(job_id, segments, tts, log, prog)
+                    dub_stats, dub_dur = align_dub(segments, model, audio_out, tgt_lang, log, prog)
+                    dub = {
+                        "file": f"/api/outputs/{audio_out.name}",
+                        "filename": audio_out.name,
+                        "duration": dub_dur,
+                        "stats": dub_stats,
+                        "provider_srt_url": meta.get("srt_url"),
+                        "provider_audio_url": meta.get("audio_url"),
+                    }
+                except Exception as e:
+                    log(f"TTS dubbing FAIL hua (translation results fir bhi ready hain): {e}")
+                    dub = {"error": str(e)}
 
             job["result"] = {
                 "language": detected,
                 "stats": stats,
                 "segments": segments,
                 "transcript": transcript,
+                "dub": dub,
             }
             prog(100, "Done ✔")
             job["status"] = "done"
@@ -403,7 +562,7 @@ app = FastAPI(title="SubSync Translate (local)")
 
 @app.get("/api/info")
 def api_info():
-    return {"device": DEVICE, "cuda": CUDA, "version": "1.3-local"}
+    return {"device": DEVICE, "cuda": CUDA, "version": "1.4-local"}
 
 
 # ---- live system stats (CPU / RAM / GPU / VRAM, in %) ----
@@ -488,6 +647,9 @@ async def create_job(
     tgt_lang: str = Form("hi"),
     model_size: str = Form("large-v3"),
     upload_id: str = Form(None),
+    tts_key: str = Form(""),
+    tts_voice: str = Form(""),
+    tts_speed: str = Form("1"),
 ):
     if upload_id:
         up = UPLOADS.pop(upload_id, None)
@@ -510,15 +672,53 @@ async def create_job(
     if model_size not in {"large-v3", "large-v3-turbo", "medium", "small", "base"}:
         model_size = "large-v3"
 
+    tts = None
+    if tts_key.strip() and tts_voice.strip():
+        tts = {"key": tts_key.strip(), "voice": tts_voice.strip(), "speed": tts_speed or "1"}
+
     job_id = uuid.uuid4().hex[:12]
     JOBS[job_id] = {"status": "queued", "progress": 0, "message": "Queued…",
                     "log": [], "result": None, "error": None}
     threading.Thread(
         target=run_job,
-        args=(job_id, tmp_path, srt_text, src_lang, tgt_lang, model_size),
+        args=(job_id, tmp_path, srt_text, src_lang, tgt_lang, model_size, tts),
         daemon=True,
     ).start()
     return {"id": job_id}
+
+
+@app.get("/api/outputs/{filename}")
+def get_output(filename: str):
+    path = (BASE / "outputs" / filename).resolve()
+    if not str(path).startswith(str((BASE / "outputs").resolve())) or not path.exists():
+        return JSONResponse({"error": "not found"}, status_code=404)
+    return FileResponse(str(path))
+
+
+@app.get("/api/tts/voices")
+def tts_voices(request: Request, provider: str = "edge", q: str = "", language: str = ""):
+    key = request.headers.get("x-tts-key", "")
+    params = {"provider": provider, "page_size": 100}
+    if q:
+        params["q"] = q
+    if language:
+        params["language"] = language
+    try:
+        r = requests.get(f"{AI33}/v3/voices", headers={"xi-api-key": key},
+                         params=params, timeout=30)
+        return JSONResponse(r.json(), status_code=r.status_code)
+    except Exception as e:
+        return JSONResponse({"success": False, "error": str(e)}, status_code=502)
+
+
+@app.get("/api/tts/credits")
+def tts_credits(request: Request):
+    key = request.headers.get("x-tts-key", "")
+    try:
+        r = requests.get(f"{AI33}/v1/credits", headers={"xi-api-key": key}, timeout=30)
+        return JSONResponse(r.json(), status_code=r.status_code)
+    except Exception as e:
+        return JSONResponse({"success": False, "error": str(e)}, status_code=502)
 
 
 @app.get("/api/jobs/{job_id}")

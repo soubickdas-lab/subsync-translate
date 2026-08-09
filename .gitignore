@@ -3,6 +3,7 @@ venv/
 *.wav
 models/
 tmp/
+outputs/
 __pycache__/
 *.pyc
 .setup-ok

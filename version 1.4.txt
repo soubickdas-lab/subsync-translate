@@ -1,11 +1,11 @@
 ==================================================
- SubSync Translate — VERSION 1.3
- Release date: 08 August 2026
+ SubSync Translate — VERSION 1.4
+ Release date: 09 August 2026
 ==================================================
 
 Ye file batati hai ki aapke paas konsa version installed hai.
 Naya update aane par is file ka naam badal jayega
-(version 1.4, version 1.5 ...) — update.bat chalane ke baad
+(version 1.5, version 1.6 ...) — update.bat chalane ke baad
 yahi file check karo.
 
 --------------------------------------------------
@@ -44,9 +44,32 @@ yahi file check karo.
     usage % har 2 second update hota hai
     (75%+ orange, 90%+ red)
 
+15. TTS DUBBING — translated text se NAYA AUDIO + uska NAYA SRT
+    (ai33.pro / OpenSpeaker API se — ElevenLabs, Minimax, Edge,
+     Kokoro, FishAudio, Vbee, Cloned voices)
+    - Naya SRT: same breaks, new audio ke exact timings
+      (dubbed audio local whisper se re-align hota hai)
+    - Voice selection 3 tarike: Saved voices (hamesha saved),
+      Voice Library (output language ke hisaab se auto-fetch),
+      Manual voice ID
+    - Voice preview, speed control (0.5-1.5)
+    - API key top-right 🔑 box me — ek baar daalo, saved rahegi
+    - Credits balance display
+    - Result me: audio player + dubbed audio download +
+      dubbed SRT download + provider SRT link
+
 --------------------------------------------------
  CHANGELOG
 --------------------------------------------------
+[Version 1.4] - 09 Aug 2026
+  + TTS dubbing: translated text -> naya audio (ai33.pro API)
+  + Dubbed audio ka naya SRT — local whisper re-alignment se,
+    same segment breaks, new audio timings
+  + Voice UI: Saved / Library (language auto-fetch) / Manual ID tabs,
+    preview, speed, credits, API key top-right (ek baar save)
+  + DNS-over-HTTPS fallback (kuch ISP DNS api.ai33.pro block karte hain)
+  + /api/outputs/* — dubbed audio serve hota hai
+
 [Version 1.3] - 08 Aug 2026
   + UI top-right me live CPU / RAM / GPU / VRAM % (har 2 sec update)
   + /api/stats endpoint (psutil + NVIDIA NVML)

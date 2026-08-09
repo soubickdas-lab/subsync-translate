@@ -21,6 +21,24 @@ body{background:radial-gradient(1200px 600px at 80% -10%,#1c1440 0%,var(--bg) 55
 .pill{border:1px solid var(--border);color:var(--muted);padding:8px 14px;border-radius:10px;font-size:.8rem}
 .pill.gpu{border-color:var(--ok);color:var(--ok)}
 .top-right{display:flex;flex-direction:column;align-items:flex-end;gap:6px}
+.key-row{display:flex;align-items:center;gap:6px;border:1px solid var(--border);border-radius:10px;padding:4px 10px;background:var(--card2)}
+.key-row input{background:transparent;border:none;outline:none;color:var(--text);font-family:ui-monospace,Consolas,monospace;font-size:.75rem;width:170px}
+.tts-tabs{display:flex;gap:8px;margin-bottom:14px}
+.tts-tab{border:1px solid var(--border);background:var(--card2);color:var(--muted);padding:8px 16px;border-radius:10px;font-size:.85rem;font-weight:600;cursor:pointer;transition:.2s}
+.tts-tab.active{border-color:var(--accent);color:var(--text);background:rgba(124,92,255,.12)}
+.voice-list{border:1px solid var(--border);border-radius:10px;max-height:300px;overflow-y:auto}
+.voice-row{display:flex;align-items:center;gap:10px;padding:9px 12px;border-bottom:1px solid #1d2436;font-size:.85rem}
+.voice-row:last-child{border-bottom:none}
+.voice-row:hover{background:rgba(124,92,255,.05)}
+.voice-row.selected{background:rgba(61,220,132,.08);border-left:3px solid var(--ok)}
+.voice-row .vname{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.voice-row .vmeta{color:var(--muted);font-size:.75rem;white-space:nowrap}
+.vbtn{border:1px solid var(--border);background:var(--card2);color:var(--text);padding:4px 10px;border-radius:8px;font-size:.75rem;cursor:pointer;transition:.15s;flex:none}
+.vbtn:hover{border-color:var(--accent)}
+.vbtn.sel{border-color:var(--ok);color:var(--ok)}
+.vbtn.del:hover{border-color:var(--err);color:var(--err)}
+.sel-voice{display:flex;align-items:center;gap:10px;margin-top:14px;padding:10px 14px;border:1px solid var(--ok);border-radius:10px;background:rgba(61,220,132,.05);font-size:.85rem;flex-wrap:wrap}
+.empty-note{padding:18px;text-align:center;color:var(--muted);font-size:.83rem}
 .stats-pill{display:flex;gap:10px;border:1px solid var(--border);padding:6px 12px;border-radius:10px;font-family:ui-monospace,Consolas,monospace;font-size:.72rem;color:var(--muted)}
 .stats-pill b{color:var(--text);font-weight:600}
 .stats-pill .hot b{color:var(--warn)}
@@ -89,12 +107,19 @@ footer{text-align:center;color:var(--muted);font-size:.78rem;margin-top:10px}
     </div>
   </div>
   <div class="top-right">
-    <span class="pill" id="devicePill">checking…</span>
+    <div style="display:flex;gap:8px;align-items:center">
+      <span class="badge ok" id="creditsBadge" hidden></span>
+      <span class="pill" id="devicePill">checking…</span>
+    </div>
     <div class="stats-pill" id="statsPill" hidden>
       <span id="stCpu">CPU <b>–</b></span>
       <span id="stRam">RAM <b>–</b></span>
       <span id="stGpu" hidden>GPU <b>–</b></span>
       <span id="stVram" hidden>VRAM <b>–</b></span>
+    </div>
+    <div class="key-row">
+      <span title="ai33.pro TTS API key — ek baar daalo, saved rahegi">🔑</span>
+      <input type="password" id="ttsKey" placeholder="ai33.pro API key" autocomplete="off" spellcheck="false">
     </div>
   </div>
 </header>
@@ -148,6 +173,79 @@ footer{text-align:center;color:var(--muted);font-size:.78rem;margin-top:10px}
     </div>
   </section>
 
+  <section class="card">
+    <h2><span class="step">3</span> Dubbed Audio (TTS)</h2>
+    <p class="hint">Translated text se <b>naya audio</b> banega (ai33.pro / OpenSpeaker) aur uska <b>naya SRT</b> — same breaks, new audio ke timings ke saath. API key top-right me 🔑 box me daalo (ek baar — saved rahegi). Key yahan se milegi: <a href="https://ai33.pro/app/api-document" target="_blank" rel="noopener">ai33.pro</a></p>
+    <label style="display:flex;align-items:center;gap:10px;margin-bottom:14px;cursor:pointer">
+      <input type="checkbox" id="ttsEnable" style="width:18px;height:18px;accent-color:var(--accent)">
+      <b>Naya audio bhi banao (TTS dubbing)</b>
+    </label>
+    <div id="ttsOptions" hidden>
+
+      <div class="tts-tabs">
+        <button class="tts-tab" id="tabSaved" data-tab="saved">⭐ Saved voices</button>
+        <button class="tts-tab active" id="tabLibrary" data-tab="library">🌐 Voice library</button>
+        <button class="tts-tab" id="tabManual" data-tab="manual">✍️ Manual ID</button>
+      </div>
+
+      <!-- SAVED -->
+      <div id="ttsTabSaved" hidden>
+        <div class="voice-list" id="savedList"></div>
+      </div>
+
+      <!-- LIBRARY -->
+      <div id="ttsTabLibrary">
+        <div class="grid3" style="margin-bottom:12px">
+          <label class="field">
+            <span>Provider</span>
+            <select id="ttsProvider">
+              <option value="edge" selected>Edge</option>
+              <option value="elevenlabs">ElevenLabs</option>
+              <option value="minimax">Minimax</option>
+              <option value="kokoro">Kokoro</option>
+              <option value="fishaudio">FishAudio</option>
+              <option value="vbee">Vbee</option>
+              <option value="clone">Mere cloned voices</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Language <small style="color:var(--muted)">(output lang se auto)</small></span>
+            <input type="text" id="ttsLangFilter" placeholder="e.g. Hindi"
+                   style="background:var(--card2);border:1px solid var(--border);color:var(--text);padding:10px 12px;border-radius:10px;font-size:.9rem;outline:none">
+          </label>
+          <label class="field">
+            <span>&nbsp;</span>
+            <button class="btn" id="ttsLoadVoices">🔄 Fetch voices</button>
+          </label>
+        </div>
+        <div class="voice-list" id="libraryList"><div class="empty-note">"🔄 Fetch voices" dabao — output language ke hisaab se list aa jayegi</div></div>
+      </div>
+
+      <!-- MANUAL -->
+      <div id="ttsTabManual" hidden>
+        <p class="hint">Voice ID directly daalo (prefix zaroori: <code>elevenlabs_</code>, <code>minimax_</code>, <code>edge_</code>, <code>kokoro_</code>, <code>vbee_</code>, <code>fishaudio_</code>, <code>clone_</code>)</p>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <input type="text" id="manualVoiceId" placeholder="e.g. edge_hi-IN-MadhurNeural"
+                 style="flex:1;min-width:240px;background:var(--card2);border:1px solid var(--border);color:var(--text);padding:10px 12px;border-radius:10px;font-family:ui-monospace,Consolas,monospace;font-size:.85rem;outline:none">
+          <button class="btn" id="manualUse">✔ Use karo</button>
+          <button class="btn ghost" id="manualSave">⭐ Save bhi karo</button>
+        </div>
+      </div>
+
+      <!-- SELECTED VOICE + SPEED -->
+      <div class="sel-voice" id="selVoiceBox" hidden>
+        <span>🎤 Selected: <b id="selVoiceName">—</b> <span class="vmeta" id="selVoiceId"></span></span>
+        <button class="vbtn" id="selPreview" hidden>▶ Preview</button>
+        <button class="vbtn" id="selSave" hidden>⭐ Save</button>
+        <span style="margin-left:auto;display:flex;align-items:center;gap:8px">Speed
+          <input type="number" id="ttsSpeed" value="1" min="0.5" max="1.5" step="0.05"
+                 style="width:70px;background:var(--card2);border:1px solid var(--border);color:var(--text);padding:6px 8px;border-radius:8px;font-size:.85rem;outline:none">
+        </span>
+      </div>
+      <audio id="ttsPreviewAudio" style="display:none"></audio>
+    </div>
+  </section>
+
   <section class="card run-card">
     <button class="btn primary big" id="runBtn" disabled>⚡ Transcribe · Re-time · Translate (100% local)</button>
     <div class="progress-wrap" id="progressWrap" hidden>
@@ -158,7 +256,7 @@ footer{text-align:center;color:var(--muted);font-size:.78rem;margin-top:10px}
   </section>
 
   <section class="card" id="resultCard" hidden>
-    <h2><span class="step">3</span> Result
+    <h2><span class="step">4</span> Result
       <span class="badge" id="detectedBadge" hidden></span>
       <span class="badge ok" id="matchBadge" hidden></span>
     </h2>
@@ -175,6 +273,18 @@ footer{text-align:center;color:var(--muted);font-size:.78rem;margin-top:10px}
       <button class="btn primary" id="dlTranslated">⬇ Translated SRT</button>
       <button class="btn ghost" id="dlRetimed">⬇ Re-timed original SRT</button>
       <button class="btn ghost" id="dlTranscript">⬇ Whisper transcript</button>
+    </div>
+    <div id="dubCard" hidden style="margin-top:20px;border-top:1px solid var(--border);padding-top:16px">
+      <h2>🎤 Dubbed Audio <span class="badge ok" id="dubBadge" hidden></span></h2>
+      <p class="hint" id="dubError" style="color:var(--err)" hidden></p>
+      <div id="dubOk" hidden>
+        <audio id="dubPlayer" controls style="width:100%;margin:10px 0"></audio>
+        <div class="dl-row" style="margin-top:8px">
+          <button class="btn primary" id="dlDubAudio">⬇ Dubbed audio</button>
+          <button class="btn primary" id="dlDubSrt">⬇ Dubbed SRT (new audio timings)</button>
+          <a class="btn ghost" id="dlProviderSrt" target="_blank" rel="noopener" hidden style="text-decoration:none;display:inline-flex;align-items:center">⬇ Provider SRT</a>
+        </div>
+      </div>
     </div>
   </section>
 
@@ -300,6 +410,192 @@ function buildSrt(segments, field){
   ).join("\n");
 }
 
+// ================= TTS dubbing controls =================
+// API key (top-right, ek baar save)
+$("ttsKey").value = localStorage.getItem("ssl_tts_key")||"";
+$("ttsKey").oninput = ()=>localStorage.setItem("ssl_tts_key", $("ttsKey").value.trim());
+$("ttsKey").onchange = refreshCredits;
+
+$("ttsEnable").checked = localStorage.getItem("ssl_tts_on")==="1";
+$("ttsOptions").hidden = !$("ttsEnable").checked;
+$("ttsEnable").onchange = ()=>{
+  localStorage.setItem("ssl_tts_on", $("ttsEnable").checked?"1":"0");
+  $("ttsOptions").hidden = !$("ttsEnable").checked;
+  if($("ttsEnable").checked) refreshCredits();
+};
+
+$("ttsProvider").value = localStorage.getItem("ssl_tts_provider")||"edge";
+$("ttsProvider").onchange = ()=>localStorage.setItem("ssl_tts_provider", $("ttsProvider").value);
+$("ttsSpeed").value = localStorage.getItem("ssl_tts_speed")||"1";
+$("ttsSpeed").onchange = ()=>localStorage.setItem("ssl_tts_speed", $("ttsSpeed").value);
+
+async function refreshCredits(){
+  const key=$("ttsKey").value.trim();
+  if(!key){ $("creditsBadge").hidden=true; return; }
+  try{
+    const d=await (await fetch("/api/tts/credits",{headers:{"x-tts-key":key}})).json();
+    if(d.credits!==undefined){
+      $("creditsBadge").hidden=false;
+      $("creditsBadge").textContent=`💰 ${d.credits} credits`;
+    }
+  }catch(e){}
+}
+if($("ttsEnable").checked && $("ttsKey").value) refreshCredits();
+
+// ---- tabs ----
+const TTS_TABS = {saved:"ttsTabSaved", library:"ttsTabLibrary", manual:"ttsTabManual"};
+function showTtsTab(name){
+  for(const [k,id] of Object.entries(TTS_TABS)) $(id).hidden = (k!==name);
+  document.querySelectorAll(".tts-tab").forEach(b=>b.classList.toggle("active", b.dataset.tab===name));
+  localStorage.setItem("ssl_tts_tab", name);
+  if(name==="saved") renderSaved();
+}
+document.querySelectorAll(".tts-tab").forEach(b=>b.onclick=()=>showTtsTab(b.dataset.tab));
+
+// ---- selected voice (persist) ----
+let selVoice = null;
+try{ selVoice = JSON.parse(localStorage.getItem("ssl_tts_sel")||"null"); }catch(e){}
+function selectVoice(v){
+  selVoice = v;
+  localStorage.setItem("ssl_tts_sel", JSON.stringify(v));
+  renderSelVoice();
+  renderSaved();
+  renderLibrary();
+}
+function renderSelVoice(){
+  const box=$("selVoiceBox");
+  if(!selVoice){ box.hidden=true; return; }
+  box.hidden=false;
+  $("selVoiceName").textContent=selVoice.name||selVoice.voice_id;
+  $("selVoiceId").textContent=selVoice.voice_id;
+  $("selPreview").hidden=!selVoice.preview_url;
+  $("selSave").hidden=isSaved(selVoice.voice_id);
+}
+$("selPreview").onclick=()=>playPreview(selVoice);
+$("selSave").onclick=()=>{ if(selVoice){ saveVoice(selVoice); renderSelVoice(); } };
+
+function playPreview(v){
+  if(v&&v.preview_url){ const a=$("ttsPreviewAudio"); a.src=v.preview_url; a.play(); }
+}
+
+// ---- saved voices (hamesha ke liye, localStorage) ----
+function getSaved(){ try{ return JSON.parse(localStorage.getItem("ssl_tts_saved")||"[]"); }catch(e){ return []; } }
+function setSaved(list){ localStorage.setItem("ssl_tts_saved", JSON.stringify(list)); }
+function isSaved(id){ return getSaved().some(v=>v.voice_id===id); }
+function saveVoice(v){
+  const list=getSaved();
+  if(!list.some(x=>x.voice_id===v.voice_id)){ list.push(v); setSaved(list); }
+  renderSaved(); renderLibrary();
+}
+function removeSaved(id){
+  setSaved(getSaved().filter(v=>v.voice_id!==id));
+  renderSaved(); renderLibrary();
+}
+
+function voiceRow(v, {saved=false}={}){
+  const row=document.createElement("div");
+  row.className="voice-row"+(selVoice&&selVoice.voice_id===v.voice_id?" selected":"");
+  const name=document.createElement("span");
+  name.className="vname"; name.textContent=v.name||v.voice_id;
+  const meta=document.createElement("span");
+  meta.className="vmeta"; meta.textContent=[v.language,v.gender].filter(Boolean).join(" · ");
+  row.append(name, meta);
+  if(v.preview_url){
+    const p=document.createElement("button"); p.className="vbtn"; p.textContent="▶";
+    p.title="Preview"; p.onclick=()=>playPreview(v); row.appendChild(p);
+  }
+  const sel=document.createElement("button");
+  sel.className="vbtn sel";
+  sel.textContent=selVoice&&selVoice.voice_id===v.voice_id?"✔ Selected":"Select";
+  sel.onclick=()=>selectVoice(v);
+  row.appendChild(sel);
+  if(saved){
+    const del=document.createElement("button"); del.className="vbtn del"; del.textContent="🗑";
+    del.title="Saved list se hatao"; del.onclick=()=>removeSaved(v.voice_id); row.appendChild(del);
+  }else{
+    const st=document.createElement("button"); st.className="vbtn";
+    st.textContent=isSaved(v.voice_id)?"⭐ Saved":"⭐ Save";
+    st.disabled=isSaved(v.voice_id);
+    st.title="Future use ke liye save karo";
+    st.onclick=()=>{ saveVoice(v); };
+    row.appendChild(st);
+  }
+  return row;
+}
+
+function renderSaved(){
+  const el=$("savedList");
+  el.innerHTML="";
+  const list=getSaved();
+  if(!list.length){
+    el.innerHTML='<div class="empty-note">Abhi koi saved voice nahi. Library se ⭐ Save karo ya Manual ID se — hamesha ke liye save rahegi.</div>';
+    return;
+  }
+  list.forEach(v=>el.appendChild(voiceRow(v,{saved:true})));
+}
+
+// ---- library (language ke hisaab se auto fetch) ----
+let libVoices=[];
+function autoLangName(){ return (LANG_NAMES[$("tgtLang").value]||"").replace(/\s*\(.*\)/,""); }
+$("ttsLangFilter").value = localStorage.getItem("ssl_tts_lang") || autoLangName();
+$("ttsLangFilter").onchange = ()=>localStorage.setItem("ssl_tts_lang", $("ttsLangFilter").value);
+$("tgtLang").addEventListener("change", ()=>{
+  // output language badli to library filter bhi auto update (agar user ne custom nahi likha)
+  $("ttsLangFilter").value = autoLangName();
+  localStorage.setItem("ssl_tts_lang", $("ttsLangFilter").value);
+});
+
+function renderLibrary(){
+  const el=$("libraryList");
+  el.innerHTML="";
+  if(!libVoices.length){
+    el.innerHTML='<div class="empty-note">"🔄 Fetch voices" dabao — output language ke hisaab se list aa jayegi</div>';
+    return;
+  }
+  libVoices.forEach(v=>el.appendChild(voiceRow(v)));
+}
+
+$("ttsLoadVoices").onclick = async ()=>{
+  const key=$("ttsKey").value.trim();
+  if(!key){ alert("Pehle top-right 🔑 box me ai33.pro API key daalo"); return; }
+  $("ttsLoadVoices").disabled=true;
+  $("ttsLoadVoices").textContent="Loading…";
+  try{
+    const params=new URLSearchParams({provider:$("ttsProvider").value});
+    const lang=$("ttsLangFilter").value.trim();
+    if(lang) params.set("language", lang);
+    const d=await (await fetch("/api/tts/voices?"+params,{headers:{"x-tts-key":key}})).json();
+    if(!d.data) throw new Error(d.error||d.message||JSON.stringify(d).slice(0,200));
+    libVoices=d.data;
+    renderLibrary();
+    if(!libVoices.length) $("libraryList").innerHTML='<div class="empty-note">Koi voice nahi mili — language filter badal ke dekho (ya khali chhodo)</div>';
+    refreshCredits();
+  }catch(e){
+    alert("Voices load nahi hui: "+e.message);
+  }finally{
+    $("ttsLoadVoices").disabled=false;
+    $("ttsLoadVoices").textContent="🔄 Fetch voices";
+  }
+};
+
+// ---- manual ID ----
+$("manualUse").onclick=()=>{
+  const id=$("manualVoiceId").value.trim();
+  if(!id){ alert("Voice ID daalo"); return; }
+  selectVoice({voice_id:id, name:id, language:"manual"});
+};
+$("manualSave").onclick=()=>{
+  const id=$("manualVoiceId").value.trim();
+  if(!id){ alert("Voice ID daalo"); return; }
+  const v={voice_id:id, name:id, language:"manual"};
+  saveVoice(v); selectVoice(v);
+};
+
+// initial render
+showTtsTab(localStorage.getItem("ssl_tts_tab")||"library");
+renderSelVoice();
+renderSaved();
+
 // Cloudflare proxy ~100 MB request limit — badi files 25 MB chunks me jaati hain
 const CHUNK_SIZE = 25 * 1024 * 1024;
 const CHUNK_THRESHOLD = 30 * 1024 * 1024;
@@ -337,6 +633,7 @@ let seenLog = 0;
 $("runBtn").addEventListener("click", async ()=>{
   $("runBtn").disabled=true;
   $("resultCard").hidden=true;
+  $("dubCard").hidden=true; state.dub=null;
   $("log").innerHTML=""; seenLog=0;
   setProgress(1,"Uploading files to server…");
   try{
@@ -352,6 +649,13 @@ $("runBtn").addEventListener("click", async ()=>{
     fd.append("src_lang", $("srcLang").value);
     fd.append("tgt_lang", $("tgtLang").value);
     fd.append("model_size", $("whisperModel").value);
+    if($("ttsEnable").checked){
+      if(!$("ttsKey").value.trim()) throw new Error("TTS on hai — top-right 🔑 box me API key daalo");
+      if(!selVoice) throw new Error("TTS on hai — pehle koi voice select karo (Saved / Library / Manual)");
+      fd.append("tts_key", $("ttsKey").value.trim());
+      fd.append("tts_voice", selVoice.voice_id);
+      fd.append("tts_speed", $("ttsSpeed").value||"1");
+    }
     const res=await fetch("/api/jobs",{method:"POST",body:fd});
     if(!res.ok) throw new Error("Server error: "+await res.text());
     const {id}=await res.json();
@@ -409,9 +713,41 @@ function showResult(result){
     tr.append(tdN,tdT,tdO,tdX);
     tbody.appendChild(tr);
   });
+  // dubbed audio results
+  const dub=result.dub;
+  $("dubCard").hidden=!dub;
+  if(dub){
+    if(dub.error){
+      $("dubError").hidden=false;
+      $("dubError").textContent="TTS dubbing fail hua: "+dub.error;
+      $("dubOk").hidden=true;
+      $("dubBadge").hidden=true;
+    }else{
+      $("dubError").hidden=true;
+      $("dubOk").hidden=false;
+      $("dubPlayer").src=dub.file;
+      state.dub=dub;
+      $("dubBadge").hidden=false;
+      $("dubBadge").textContent=`⏱ ${dub.stats.matchedSegments}/${dub.stats.totalSegments} timed · ${Math.round(dub.duration)}s`;
+      const ps=$("dlProviderSrt");
+      if(dub.provider_srt_url){ ps.hidden=false; ps.href=dub.provider_srt_url; } else ps.hidden=true;
+    }
+  }
   $("resultCard").hidden=false;
   $("resultCard").scrollIntoView({behavior:"smooth",block:"start"});
 }
+
+function buildDubSrt(segments){
+  return segments.map((seg,i)=>
+    `${i+1}\n${toSrtTime(seg.dubStart)} --> ${toSrtTime(seg.dubEnd)}\n${(seg.translated||seg.text).trim()}\n`
+  ).join("\n");
+}
+$("dlDubAudio").addEventListener("click",()=>{
+  if(state.dub){ const a=document.createElement("a"); a.href=state.dub.file; a.download=state.dub.filename; a.click(); }
+});
+$("dlDubSrt").addEventListener("click",()=>{
+  if(state.segments) download(`${baseName()}.${$("tgtLang").value}.dubbed.srt`, buildDubSrt(state.segments));
+});
 
 function download(name,content){
   const blob=new Blob([content],{type:"text/plain;charset=utf-8"});
