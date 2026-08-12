@@ -39,11 +39,16 @@ body{background:radial-gradient(1200px 600px at 80% -10%,#1c1440 0%,var(--bg) 55
 .vbtn.del:hover{border-color:var(--err);color:var(--err)}
 .sel-voice{display:flex;align-items:center;gap:10px;margin-top:14px;padding:10px 14px;border:1px solid var(--ok);border-radius:10px;background:rgba(61,220,132,.05);font-size:.85rem;flex-wrap:wrap}
 .empty-note{padding:18px;text-align:center;color:var(--muted);font-size:.83rem}
-#liveCaption{background:var(--card2);border:1px solid var(--border);border-radius:12px;padding:20px 18px;text-align:center;margin-bottom:10px;font-size:clamp(16px,2.4vw,22px);font-weight:700;line-height:1.4;min-height:74px;display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--muted);transition:color .1s}
-#liveCaption.speaking{color:var(--accent2)}
-#playerBox{margin-bottom:14px}
-#playerBox audio{width:100%}
-#playerBox video{width:100%;max-height:380px;border-radius:12px;background:#000}
+#mediaBox video{width:100%;max-height:380px;border-radius:12px;background:#000;margin-bottom:10px}
+.player{display:flex;align-items:center;gap:14px;background:linear-gradient(135deg,rgba(124,92,255,.14),rgba(77,208,225,.07));border:1px solid var(--border);border-radius:14px;padding:12px 18px}
+.pbtn{width:48px;height:48px;border-radius:50%;border:none;flex:none;background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;font-size:1.15rem;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 14px rgba(124,92,255,.4);transition:.15s}
+.pbtn:hover{transform:scale(1.07);filter:brightness(1.1)}
+.ptime{font-family:ui-monospace,Consolas,monospace;font-size:.78rem;color:var(--muted);flex:none;min-width:44px;text-align:center}
+#pSeek{flex:1;-webkit-appearance:none;appearance:none;height:6px;border-radius:6px;background:var(--card2);outline:none;cursor:pointer}
+#pSeek::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:15px;height:15px;border-radius:50%;background:var(--accent2);box-shadow:0 0 8px rgba(77,208,225,.6);cursor:pointer}
+#pSeek::-moz-range-thumb{width:15px;height:15px;border:none;border-radius:50%;background:var(--accent2);cursor:pointer}
+tbody tr.playing{background:rgba(77,208,225,.13)!important;box-shadow:inset 3px 0 0 var(--accent2)}
+tbody tr.playing td.trans{color:var(--accent2)}
 .stats-pill{display:flex;gap:10px;border:1px solid var(--border);padding:6px 12px;border-radius:10px;font-family:ui-monospace,Consolas,monospace;font-size:.72rem;color:var(--muted)}
 .stats-pill b{color:var(--text);font-weight:600}
 .stats-pill .hot b{color:var(--warn)}
@@ -267,15 +272,21 @@ footer{text-align:center;color:var(--muted);font-size:.78rem;margin-top:10px}
     </h2>
     <p class="hint">Translated cells <b>editable</b> hain — download se pehle koi bhi line theek kar lo.</p>
 
-    <!-- Sync verify: player + live caption -->
+    <!-- Sync verify: modern player, current line table me highlight hoti hai -->
     <div id="syncBox" style="margin-bottom:16px">
       <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;align-items:center">
         <button class="tts-tab active" id="srcOrig">🎵 Original audio</button>
         <button class="tts-tab" id="srcDub" hidden>🎤 Dubbed audio</button>
         <button class="tts-tab" id="gapBtn" style="margin-left:auto" title="Har line ka end agli line ke start tak extend — dobara click = undo">🧲 Fill Gaps</button>
       </div>
-      <div id="liveCaption">▶ Play karo — jo bol raha hai wo yahan live aayega</div>
-      <div id="playerBox"></div>
+      <div id="mediaBox"></div>
+      <div class="player">
+        <button class="pbtn" id="ppBtn" title="Play/Pause">▶</button>
+        <span class="ptime" id="pCur">0:00</span>
+        <input type="range" id="pSeek" min="0" max="1000" value="0">
+        <span class="ptime" id="pDur">0:00</span>
+      </div>
+      <p class="hint" style="margin:8px 0 0">▶ Play karo — jo line bol rahi hai wo neeche table me <b>highlight + auto-scroll</b> hogi, wahi se sync verify karo.</p>
     </div>
 
     <div class="table-wrap">
@@ -746,6 +757,7 @@ function showResult(result){
 }
 
 function renderTable(){
+  lastPlayingRow=-1;
   const tbody=$("resultTable").querySelector("tbody");
   tbody.innerHTML="";
   (state.segments||[]).forEach((seg,i)=>{
@@ -765,16 +777,24 @@ function renderTable(){
   });
 }
 
-/* ---------- sync-verify player + live caption (VoxCap style) ---------- */
-let playerMedia=null, playerMode="orig";
+/* ---------- sync-verify: modern player + table row highlight ---------- */
+let playerMedia=null, playerMode="orig", lastPlayingRow=-1;
 function setSrcTabs(){
   $("srcOrig").classList.toggle("active", playerMode==="orig");
   $("srcDub").classList.toggle("active", playerMode==="dub");
 }
+const fmtTime=(s)=>{
+  if(!isFinite(s)) return "0:00";
+  s=Math.max(0,Math.floor(s));
+  const m=Math.floor(s/60);
+  return m+":"+String(s%60).padStart(2,"0");
+};
 function buildVerifyPlayer(){
-  const box=$("playerBox");
-  if(playerMedia && playerMedia.src.startsWith("blob:")){ try{URL.revokeObjectURL(playerMedia.src);}catch(e){} }
-  box.innerHTML="";
+  if(playerMedia){
+    if(playerMedia.src.startsWith("blob:")){ try{URL.revokeObjectURL(playerMedia.src);}catch(e){} }
+    playerMedia.pause();
+  }
+  $("mediaBox").innerHTML="";
   let src, isVideo=false;
   if(playerMode==="dub" && state.dub && state.dub.file){
     src=state.dub.file;
@@ -785,40 +805,60 @@ function buildVerifyPlayer(){
   }
   playerMedia=document.createElement(isVideo?"video":"audio");
   playerMedia.src=src;
-  playerMedia.controls=true;
   playerMedia.preload="metadata";
-  box.appendChild(playerMedia);
-  $("liveCaption").textContent="▶ Play karo — jo bol raha hai wo yahan live aayega";
-  $("liveCaption").classList.remove("speaking");
+  if(isVideo) $("mediaBox").appendChild(playerMedia); // video dikhega, audio hidden rehta hai
+
+  $("ppBtn").textContent="▶";
+  $("pSeek").value=0;
+  $("pCur").textContent="0:00";
+  $("pDur").textContent="0:00";
+  clearRowHighlight();
+
+  playerMedia.addEventListener("loadedmetadata",()=>{ $("pDur").textContent=fmtTime(playerMedia.duration); });
+  playerMedia.addEventListener("timeupdate",()=>{
+    if(playerMedia.duration) $("pSeek").value=Math.round(playerMedia.currentTime/playerMedia.duration*1000);
+    $("pCur").textContent=fmtTime(playerMedia.currentTime);
+  });
+  playerMedia.addEventListener("play",()=>{ $("ppBtn").textContent="⏸"; });
+  playerMedia.addEventListener("pause",()=>{ $("ppBtn").textContent="▶"; });
+  playerMedia.addEventListener("ended",()=>{ $("ppBtn").textContent="▶"; clearRowHighlight(); });
 }
+$("ppBtn").onclick=()=>{
+  if(!playerMedia) return;
+  playerMedia.paused ? playerMedia.play() : playerMedia.pause();
+};
+$("pSeek").oninput=()=>{
+  if(playerMedia && playerMedia.duration){
+    playerMedia.currentTime = ($("pSeek").value/1000)*playerMedia.duration;
+  }
+};
 $("srcOrig").onclick=()=>{ playerMode="orig"; setSrcTabs(); buildVerifyPlayer(); };
 $("srcDub").onclick=()=>{ playerMode="dub"; setSrcTabs(); buildVerifyPlayer(); };
 
+function clearRowHighlight(){
+  if(lastPlayingRow>=0){
+    const rows=$("resultTable").querySelectorAll("tbody tr");
+    if(rows[lastPlayingRow]) rows[lastPlayingRow].classList.remove("playing");
+  }
+  lastPlayingRow=-1;
+}
 setInterval(()=>{
-  if(!playerMedia || !state.segments) return;
+  if(!playerMedia || !state.segments || playerMedia.paused) return;
   const t=playerMedia.currentTime;
-  const box=$("liveCaption");
-  let seg, main, sub="";
+  let idx=-1;
   if(playerMode==="dub"){
-    seg=state.segments.find(s=>s.dubStart!==undefined && t>=s.dubStart && t<=s.dubEnd);
-    if(seg) main=(seg.translated||"").trim();
+    idx=state.segments.findIndex(s=>s.dubStart!==undefined && t>=s.dubStart && t<=s.dubEnd);
   }else{
-    seg=state.segments.find(s=>t>=s.newStart && t<=s.newEnd);
-    if(seg){ main=seg.text.replace(/\n/g," "); sub=(seg.translated||"").trim(); }
+    idx=state.segments.findIndex(s=>t>=s.newStart && t<=s.newEnd);
   }
-  if(seg){
-    box.innerHTML="";
-    const m=document.createElement("div"); m.textContent=main; box.appendChild(m);
-    if(sub){
-      const s2=document.createElement("div");
-      s2.style.cssText="font-size:.72em;color:var(--muted);font-weight:500;margin-top:5px";
-      s2.textContent=sub; box.appendChild(s2);
-    }
-    box.classList.add("speaking");
-  }else if(!playerMedia.paused){
-    box.textContent="· · ·";
-    box.classList.remove("speaking");
+  if(idx===lastPlayingRow) return;
+  const rows=$("resultTable").querySelectorAll("tbody tr");
+  if(lastPlayingRow>=0 && rows[lastPlayingRow]) rows[lastPlayingRow].classList.remove("playing");
+  if(idx>=0 && rows[idx]){
+    rows[idx].classList.add("playing");
+    rows[idx].scrollIntoView({block:"nearest",behavior:"smooth"});
   }
+  lastPlayingRow=idx;
 },100);
 
 /* ---------- gap fill toggle (VoxCap style) ---------- */

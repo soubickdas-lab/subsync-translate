@@ -560,9 +560,18 @@ def run_job(job_id, audio_path, srt_text, src_lang, tgt_lang, model_size, tts=No
 app = FastAPI(title="SubSync Translate (local)")
 
 
+@app.middleware("http")
+async def no_cache_html(request, call_next):
+    # HTML kabhi cache na ho — update ke baad "purana page" wali problem khatam
+    response = await call_next(request)
+    if "text/html" in response.headers.get("content-type", ""):
+        response.headers["Cache-Control"] = "no-cache, must-revalidate"
+    return response
+
+
 @app.get("/api/info")
 def api_info():
-    return {"device": DEVICE, "cuda": CUDA, "version": "1.4-local"}
+    return {"device": DEVICE, "cuda": CUDA, "version": "1.6-local"}
 
 
 # ---- live system stats (CPU / RAM / GPU / VRAM, in %) ----
