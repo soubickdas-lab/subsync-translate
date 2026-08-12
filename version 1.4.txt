@@ -61,6 +61,13 @@ yahi file check karo.
 --------------------------------------------------
  CHANGELOG
 --------------------------------------------------
+[Version 1.4 fix] - 09 Aug 2026
+  * start-live.bat ab bulletproof: double-click par purane SubSync
+    instances khud band hote hain (port conflict khatam), server ready
+    hone ka wait hota hai, phir live site khulti hai
+  * Sirf apne processes band karta hai — dusre projects (VoxCap etc.)
+    ke tunnels/servers ab safe hain
+
 [Version 1.4] - 09 Aug 2026
   + TTS dubbing: translated text -> naya audio (ai33.pro API)
   + Dubbed audio ka naya SRT — local whisper re-alignment se,
