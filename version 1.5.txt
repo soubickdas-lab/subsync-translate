@@ -1,11 +1,11 @@
 ==================================================
- SubSync Translate — VERSION 1.4
+ SubSync Translate — VERSION 1.5
  Release date: 09 August 2026
 ==================================================
 
 Ye file batati hai ki aapke paas konsa version installed hai.
 Naya update aane par is file ka naam badal jayega
-(version 1.5, version 1.6 ...) — update.bat chalane ke baad
+(version 1.6, version 1.7 ...) — update.bat chalane ke baad
 yahi file check karo.
 
 --------------------------------------------------
@@ -58,9 +58,24 @@ yahi file check karo.
     - Result me: audio player + dubbed audio download +
       dubbed SRT download + provider SRT link
 
+16. SYNC VERIFY PLAYER — result me audio player + LIVE caption box:
+    play karte hi jo line bol rahi hai wo real-time me bade box me
+    dikhti hai (original audio ya dubbed audio, dono ka option) —
+    SRT aur audio ka sync aankhon se verify karo
+17. FILL GAPS toggle (VoxCap jaisa) — ek click me har line ka end
+    agli line ke start tak extend (pehli line 0 se); dobara click =
+    sab original timings par wapas (undo). Gap-filled state me SRT
+    download karo to filename ke last me " gap-filled" likha aata hai
+
 --------------------------------------------------
  CHANGELOG
 --------------------------------------------------
+[Version 1.5] - 09 Aug 2026
+  + Sync-verify player: result me audio/video player + live caption box
+    (original + dubbed dono source), 100ms real-time update
+  + Fill Gaps toggle — fill/undo, downloads me " gap-filled" filename tag
+    (translated / re-timed / dubbed teeno SRT par lagta hai)
+
 [Version 1.4 fix] - 09 Aug 2026
   * start-live.bat ab bulletproof: double-click par purane SubSync
     instances khud band hote hain (port conflict khatam), server ready

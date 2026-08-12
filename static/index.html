@@ -39,6 +39,11 @@ body{background:radial-gradient(1200px 600px at 80% -10%,#1c1440 0%,var(--bg) 55
 .vbtn.del:hover{border-color:var(--err);color:var(--err)}
 .sel-voice{display:flex;align-items:center;gap:10px;margin-top:14px;padding:10px 14px;border:1px solid var(--ok);border-radius:10px;background:rgba(61,220,132,.05);font-size:.85rem;flex-wrap:wrap}
 .empty-note{padding:18px;text-align:center;color:var(--muted);font-size:.83rem}
+#liveCaption{background:var(--card2);border:1px solid var(--border);border-radius:12px;padding:20px 18px;text-align:center;margin-bottom:10px;font-size:clamp(16px,2.4vw,22px);font-weight:700;line-height:1.4;min-height:74px;display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--muted);transition:color .1s}
+#liveCaption.speaking{color:var(--accent2)}
+#playerBox{margin-bottom:14px}
+#playerBox audio{width:100%}
+#playerBox video{width:100%;max-height:380px;border-radius:12px;background:#000}
 .stats-pill{display:flex;gap:10px;border:1px solid var(--border);padding:6px 12px;border-radius:10px;font-family:ui-monospace,Consolas,monospace;font-size:.72rem;color:var(--muted)}
 .stats-pill b{color:var(--text);font-weight:600}
 .stats-pill .hot b{color:var(--warn)}
@@ -261,6 +266,18 @@ footer{text-align:center;color:var(--muted);font-size:.78rem;margin-top:10px}
       <span class="badge ok" id="matchBadge" hidden></span>
     </h2>
     <p class="hint">Translated cells <b>editable</b> hain — download se pehle koi bhi line theek kar lo.</p>
+
+    <!-- Sync verify: player + live caption -->
+    <div id="syncBox" style="margin-bottom:16px">
+      <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;align-items:center">
+        <button class="tts-tab active" id="srcOrig">🎵 Original audio</button>
+        <button class="tts-tab" id="srcDub" hidden>🎤 Dubbed audio</button>
+        <button class="tts-tab" id="gapBtn" style="margin-left:auto" title="Har line ka end agli line ke start tak extend — dobara click = undo">🧲 Fill Gaps</button>
+      </div>
+      <div id="liveCaption">▶ Play karo — jo bol raha hai wo yahan live aayega</div>
+      <div id="playerBox"></div>
+    </div>
+
     <div class="table-wrap">
       <table id="resultTable">
         <thead>
@@ -696,23 +713,14 @@ function showResult(result){
   $("matchBadge").hidden=false;
   $("matchBadge").textContent=`⏱ ${st.matchedSegments}/${st.totalSegments} re-timed from audio`;
 
-  const tbody=$("resultTable").querySelector("tbody");
-  tbody.innerHTML="";
-  result.segments.forEach((seg,i)=>{
-    const tr=document.createElement("tr");
-    const tdN=document.createElement("td"); tdN.className="num"; tdN.textContent=i+1;
-    const tdT=document.createElement("td");
-    tdT.className="time"+(seg.matched?"":" unmatched");
-    tdT.innerHTML=`<s>${toSrtTime(seg.start)}</s><br><span class="new">${toSrtTime(seg.newStart)} → ${toSrtTime(seg.newEnd)}</span>`;
-    if(!seg.matched) tdT.title="Audio me match nahi mila — timing interpolate hui";
-    const tdO=document.createElement("td"); tdO.className="orig"; tdO.textContent=seg.text;
-    const tdX=document.createElement("td"); tdX.className="trans";
-    tdX.contentEditable="plaintext-only" in document.body ? "plaintext-only" : "true";
-    tdX.textContent=seg.translated;
-    tdX.addEventListener("input",()=>{ seg.translated=tdX.textContent; });
-    tr.append(tdN,tdT,tdO,tdX);
-    tbody.appendChild(tr);
-  });
+  renderTable();
+
+  // sync-verify player + gap reset
+  gapsFilled=false; gapOrig=null;
+  $("gapBtn").textContent="🧲 Fill Gaps";
+  playerMode="orig"; setSrcTabs();
+  $("srcDub").hidden = !(result.dub && !result.dub.error);
+  buildVerifyPlayer();
   // dubbed audio results
   const dub=result.dub;
   $("dubCard").hidden=!dub;
@@ -737,6 +745,110 @@ function showResult(result){
   $("resultCard").scrollIntoView({behavior:"smooth",block:"start"});
 }
 
+function renderTable(){
+  const tbody=$("resultTable").querySelector("tbody");
+  tbody.innerHTML="";
+  (state.segments||[]).forEach((seg,i)=>{
+    const tr=document.createElement("tr");
+    const tdN=document.createElement("td"); tdN.className="num"; tdN.textContent=i+1;
+    const tdT=document.createElement("td");
+    tdT.className="time"+(seg.matched?"":" unmatched");
+    tdT.innerHTML=`<s>${toSrtTime(seg.start)}</s><br><span class="new">${toSrtTime(seg.newStart)} → ${toSrtTime(seg.newEnd)}</span>`;
+    if(!seg.matched) tdT.title="Audio me match nahi mila — timing interpolate hui";
+    const tdO=document.createElement("td"); tdO.className="orig"; tdO.textContent=seg.text;
+    const tdX=document.createElement("td"); tdX.className="trans";
+    tdX.contentEditable="plaintext-only" in document.body ? "plaintext-only" : "true";
+    tdX.textContent=seg.translated;
+    tdX.addEventListener("input",()=>{ seg.translated=tdX.textContent; });
+    tr.append(tdN,tdT,tdO,tdX);
+    tbody.appendChild(tr);
+  });
+}
+
+/* ---------- sync-verify player + live caption (VoxCap style) ---------- */
+let playerMedia=null, playerMode="orig";
+function setSrcTabs(){
+  $("srcOrig").classList.toggle("active", playerMode==="orig");
+  $("srcDub").classList.toggle("active", playerMode==="dub");
+}
+function buildVerifyPlayer(){
+  const box=$("playerBox");
+  if(playerMedia && playerMedia.src.startsWith("blob:")){ try{URL.revokeObjectURL(playerMedia.src);}catch(e){} }
+  box.innerHTML="";
+  let src, isVideo=false;
+  if(playerMode==="dub" && state.dub && state.dub.file){
+    src=state.dub.file;
+  }else{
+    if(!state.audio) return;
+    src=URL.createObjectURL(state.audio);
+    isVideo=(state.audio.type||"").startsWith("video");
+  }
+  playerMedia=document.createElement(isVideo?"video":"audio");
+  playerMedia.src=src;
+  playerMedia.controls=true;
+  playerMedia.preload="metadata";
+  box.appendChild(playerMedia);
+  $("liveCaption").textContent="▶ Play karo — jo bol raha hai wo yahan live aayega";
+  $("liveCaption").classList.remove("speaking");
+}
+$("srcOrig").onclick=()=>{ playerMode="orig"; setSrcTabs(); buildVerifyPlayer(); };
+$("srcDub").onclick=()=>{ playerMode="dub"; setSrcTabs(); buildVerifyPlayer(); };
+
+setInterval(()=>{
+  if(!playerMedia || !state.segments) return;
+  const t=playerMedia.currentTime;
+  const box=$("liveCaption");
+  let seg, main, sub="";
+  if(playerMode==="dub"){
+    seg=state.segments.find(s=>s.dubStart!==undefined && t>=s.dubStart && t<=s.dubEnd);
+    if(seg) main=(seg.translated||"").trim();
+  }else{
+    seg=state.segments.find(s=>t>=s.newStart && t<=s.newEnd);
+    if(seg){ main=seg.text.replace(/\n/g," "); sub=(seg.translated||"").trim(); }
+  }
+  if(seg){
+    box.innerHTML="";
+    const m=document.createElement("div"); m.textContent=main; box.appendChild(m);
+    if(sub){
+      const s2=document.createElement("div");
+      s2.style.cssText="font-size:.72em;color:var(--muted);font-weight:500;margin-top:5px";
+      s2.textContent=sub; box.appendChild(s2);
+    }
+    box.classList.add("speaking");
+  }else if(!playerMedia.paused){
+    box.textContent="· · ·";
+    box.classList.remove("speaking");
+  }
+},100);
+
+/* ---------- gap fill toggle (VoxCap style) ---------- */
+let gapsFilled=false, gapOrig=null;
+const gapTag=()=> gapsFilled ? " gap-filled" : "";
+$("gapBtn").onclick=()=>{
+  const segs=state.segments;
+  if(!segs||!segs.length) return;
+  if(!gapsFilled){
+    // har caption ka END agli caption ke START tak (pehli 0 se); dobara click = undo
+    gapOrig=segs.map(s=>[s.newStart,s.newEnd,s.dubStart,s.dubEnd]);
+    segs[0].newStart=0;
+    for(let i=0;i<segs.length-1;i++) segs[i].newEnd=segs[i+1].newStart;
+    if(segs[0].dubStart!==undefined){
+      segs[0].dubStart=0;
+      for(let i=0;i<segs.length-1;i++) segs[i].dubEnd=segs[i+1].dubStart;
+    }
+    gapsFilled=true;
+    $("gapBtn").textContent="✅ Gaps filled — undo";
+  }else{
+    segs.forEach((s,i)=>{
+      s.newStart=gapOrig[i][0]; s.newEnd=gapOrig[i][1];
+      if(gapOrig[i][2]!==undefined){ s.dubStart=gapOrig[i][2]; s.dubEnd=gapOrig[i][3]; }
+    });
+    gapsFilled=false;
+    $("gapBtn").textContent="🧲 Fill Gaps";
+  }
+  renderTable();
+};
+
 function buildDubSrt(segments){
   return segments.map((seg,i)=>
     `${i+1}\n${toSrtTime(seg.dubStart)} --> ${toSrtTime(seg.dubEnd)}\n${(seg.translated||seg.text).trim()}\n`
@@ -746,7 +858,7 @@ $("dlDubAudio").addEventListener("click",()=>{
   if(state.dub){ const a=document.createElement("a"); a.href=state.dub.file; a.download=state.dub.filename; a.click(); }
 });
 $("dlDubSrt").addEventListener("click",()=>{
-  if(state.segments) download(`${baseName()}.${$("tgtLang").value}.dubbed.srt`, buildDubSrt(state.segments));
+  if(state.segments) download(`${baseName()}.${$("tgtLang").value}.dubbed${gapTag()}.srt`, buildDubSrt(state.segments));
 });
 
 function download(name,content){
@@ -758,10 +870,10 @@ function download(name,content){
 const baseName=()=> (state.srtFile?state.srtFile.name:"subtitles").replace(/\.(srt|vtt)$/i,"");
 
 $("dlTranslated").addEventListener("click",()=>{
-  if(state.segments) download(`${baseName()}.${$("tgtLang").value}.srt`, buildSrt(state.segments,"translated"));
+  if(state.segments) download(`${baseName()}.${$("tgtLang").value}${gapTag()}.srt`, buildSrt(state.segments,"translated"));
 });
 $("dlRetimed").addEventListener("click",()=>{
-  if(state.segments) download(`${baseName()}.retimed.srt`, buildSrt(state.segments,"text"));
+  if(state.segments) download(`${baseName()}.retimed${gapTag()}.srt`, buildSrt(state.segments,"text"));
 });
 $("dlTranscript").addEventListener("click",()=>{
   if(state.transcript) download(`${baseName()}.transcript.txt`, state.transcript);
