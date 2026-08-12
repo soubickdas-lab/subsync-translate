@@ -43,9 +43,9 @@ body{background:radial-gradient(1200px 600px at 80% -10%,#1c1440 0%,var(--bg) 55
 .player{display:flex;align-items:center;gap:14px;background:linear-gradient(135deg,rgba(124,92,255,.14),rgba(77,208,225,.07));border:1px solid var(--border);border-radius:14px;padding:12px 18px}
 .pbtn{width:48px;height:48px;border-radius:50%;border:none;flex:none;background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;font-size:1.15rem;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 14px rgba(124,92,255,.4);transition:.15s}
 .pbtn:hover{transform:scale(1.07);filter:brightness(1.1)}
-.ptime{font-family:ui-monospace,Consolas,monospace;font-size:.78rem;color:var(--muted);flex:none;min-width:44px;text-align:center}
-.ptime.srt-time{color:var(--accent2);font-weight:700;min-width:104px;background:var(--card2);border:1px solid var(--border);border-radius:8px;padding:5px 8px}
-@media (max-width:640px){.ptime.srt-time{display:none}}
+.ptime{font-family:ui-monospace,Consolas,monospace;font-size:.78rem;color:var(--muted);flex:none;min-width:100px;text-align:center}
+.ptime.srt-time{color:var(--accent2);font-weight:700;background:var(--card2);border:1px solid var(--border);border-radius:8px;padding:5px 8px}
+@media (max-width:640px){.ptime:not(.srt-time){display:none}}
 #pSeek{flex:1;-webkit-appearance:none;appearance:none;height:6px;border-radius:6px;background:var(--card2);outline:none;cursor:pointer}
 #pSeek::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:15px;height:15px;border-radius:50%;background:var(--accent2);box-shadow:0 0 8px rgba(77,208,225,.6);cursor:pointer}
 #pSeek::-moz-range-thumb{width:15px;height:15px;border:none;border-radius:50%;background:var(--accent2);cursor:pointer}
@@ -284,10 +284,9 @@ footer{text-align:center;color:var(--muted);font-size:.78rem;margin-top:10px}
       <div id="mediaBox"></div>
       <div class="player">
         <button class="pbtn" id="ppBtn" title="Play/Pause">▶</button>
-        <span class="ptime" id="pCur">0:00</span>
+        <span class="ptime srt-time" id="pCur" title="Current time (SRT format)">00:00:00,000</span>
         <input type="range" id="pSeek" min="0" max="1000" value="0">
-        <span class="ptime" id="pDur">0:00</span>
-        <span class="ptime srt-time" id="pSrtTime" title="Current time (SRT format) — table ki timing se match karo">00:00:00,000</span>
+        <span class="ptime" id="pDur" title="Total duration">00:00:00,000</span>
       </div>
       <p class="hint" style="margin:8px 0 0">▶ Play karo — jo line bol rahi hai wo neeche table me <b>highlight + auto-scroll</b> hogi, wahi se sync verify karo.</p>
     </div>
@@ -786,12 +785,7 @@ function setSrcTabs(){
   $("srcOrig").classList.toggle("active", playerMode==="orig");
   $("srcDub").classList.toggle("active", playerMode==="dub");
 }
-const fmtTime=(s)=>{
-  if(!isFinite(s)) return "0:00";
-  s=Math.max(0,Math.floor(s));
-  const m=Math.floor(s/60);
-  return m+":"+String(s%60).padStart(2,"0");
-};
+const srtClock=(s)=> isFinite(s) ? toSrtTime(s) : "00:00:00,000";
 function buildVerifyPlayer(){
   if(playerMedia){
     if(playerMedia.src.startsWith("blob:")){ try{URL.revokeObjectURL(playerMedia.src);}catch(e){} }
@@ -813,15 +807,14 @@ function buildVerifyPlayer(){
 
   $("ppBtn").textContent="▶";
   $("pSeek").value=0;
-  $("pCur").textContent="0:00";
-  $("pDur").textContent="0:00";
-  $("pSrtTime").textContent="00:00:00,000";
+  $("pCur").textContent="00:00:00,000";
+  $("pDur").textContent="00:00:00,000";
   clearRowHighlight();
 
-  playerMedia.addEventListener("loadedmetadata",()=>{ $("pDur").textContent=fmtTime(playerMedia.duration); });
+  playerMedia.addEventListener("loadedmetadata",()=>{ $("pDur").textContent=srtClock(playerMedia.duration); });
   playerMedia.addEventListener("timeupdate",()=>{
     if(playerMedia.duration && !seekDragging) $("pSeek").value=Math.round(playerMedia.currentTime/playerMedia.duration*1000);
-    $("pCur").textContent=fmtTime(playerMedia.currentTime);
+    $("pCur").textContent=srtClock(playerMedia.currentTime);
   });
   playerMedia.addEventListener("play",()=>{ $("ppBtn").textContent="⏸"; });
   playerMedia.addEventListener("pause",()=>{ $("ppBtn").textContent="▶"; });
@@ -852,8 +845,7 @@ function clearRowHighlight(){
 setInterval(()=>{
   if(!playerMedia) return;
   // time display har 100ms smooth update (paused/seek me bhi)
-  $("pCur").textContent=fmtTime(playerMedia.currentTime);
-  $("pSrtTime").textContent=toSrtTime(playerMedia.currentTime);
+  $("pCur").textContent=srtClock(playerMedia.currentTime);
   if(playerMedia.duration && !seekDragging) $("pSeek").value=Math.round(playerMedia.currentTime/playerMedia.duration*1000);
   if(!state.segments || playerMedia.paused) return;
   const t=playerMedia.currentTime;
