@@ -73,6 +73,9 @@ yahi file check karo.
 --------------------------------------------------
 [Version 1.6] - 09 Aug 2026
   + Modern custom player (round play/pause, styled seek bar, time)
+  + Player me PRECISE TIME display: normal (0:03 / 1:24) + SRT-format
+    box (00:00:03,456) milliseconds ke saath — table ki timing se
+    directly match karo; paused/seek me bhi live update
   + Live caption box hataya — ab current line SRT TABLE me hi
     real-time highlight + auto-scroll hoti hai (100ms)
   + HTML no-cache header — update ke baad "purana page dikh raha hai"
