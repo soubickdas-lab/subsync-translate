@@ -139,20 +139,25 @@ footer{text-align:center;color:var(--muted);font-size:.78rem;margin-top:10px}
 <main>
 
   <section class="card">
+    <div class="tts-tabs" style="margin-bottom:14px">
+      <button class="tts-tab active" id="modeFull">🎬 Full — Translate + Dub</button>
+      <button class="tts-tab" id="modeResync">🔁 Re-sync only — SRT ↔ Audio</button>
+    </div>
+    <p class="hint" id="modeHint">Audio + uska SRT do → translate hoke re-timed SRT milega (chaaho to TTS dub bhi).</p>
     <h2><span class="step">1</span> Upload Files</h2>
     <div class="grid2">
       <div class="drop" id="dropAudio">
         <input type="file" id="audioFile" accept="audio/*,video/*,.mp3,.wav,.m4a,.mp4,.mkv,.aac,.ogg,.flac,.webm,.opus" hidden>
         <div class="drop-icon">🎵</div>
-        <div class="drop-title">Audio file</div>
-        <div class="drop-sub">mp3 · wav · m4a · flac · mp4 · mkv … (koi size limit nahi — local hai)</div>
+        <div class="drop-title" id="audioDropTitle">Audio file</div>
+        <div class="drop-sub" id="audioDropSub">mp3 · wav · m4a · flac · mp4 · mkv … (koi size limit nahi — local hai)</div>
         <div class="file-chip" id="audioChip" hidden></div>
       </div>
       <div class="drop" id="dropSrt">
         <input type="file" id="srtFile" accept=".srt,.vtt,text/plain" hidden>
         <div class="drop-icon">💬</div>
-        <div class="drop-title">Subtitle file (.srt / .vtt)</div>
-        <div class="drop-sub">Iske breaks exactly preserve honge</div>
+        <div class="drop-title" id="srtDropTitle">Subtitle file (.srt / .vtt)</div>
+        <div class="drop-sub" id="srtDropSub">Iske breaks exactly preserve honge</div>
         <div class="file-chip" id="srtChip" hidden></div>
       </div>
     </div>
@@ -177,7 +182,7 @@ footer{text-align:center;color:var(--muted);font-size:.78rem;margin-top:10px}
         </select>
         <small>Pehli baar model download hota hai (large-v3 ≈ 3 GB)</small>
       </label>
-      <label class="field">
+      <label class="field" id="tgtField">
         <span>Translate to</span>
         <select id="tgtLang"></select>
         <small>NLLB-200 se local translation</small>
@@ -185,7 +190,7 @@ footer{text-align:center;color:var(--muted);font-size:.78rem;margin-top:10px}
     </div>
   </section>
 
-  <section class="card">
+  <section class="card" id="ttsCard">
     <h2><span class="step">3</span> Dubbed Audio (TTS)</h2>
     <p class="hint">Translated text se <b>naya audio</b> banega (ai33.pro / OpenSpeaker) aur uska <b>naya SRT</b> — same breaks, new audio ke timings ke saath. API key top-right me 🔑 box me daalo (ek baar — saved rahegi). Key yahan se milegi: <a href="https://ai33.pro/app/api-document" target="_blank" rel="noopener">ai33.pro</a></p>
     <label style="display:flex;align-items:center;gap:10px;margin-bottom:14px;cursor:pointer">
@@ -348,7 +353,26 @@ const TGT_LANGS = [
 const LANG_NAMES = Object.fromEntries([...SRC_LANGS,...TGT_LANGS].map(([c,n])=>[c,n.replace("🔍 ","")]));
 
 const $ = id => document.getElementById(id);
-const state = { audio:null, srtFile:null, segments:null, transcript:"" };
+const state = { audio:null, srtFile:null, segments:null, transcript:"", mode:"full" };
+
+// ---- mode: full pipeline vs re-sync only ----
+function setMode(m){
+  state.mode=m;
+  $("modeFull").classList.toggle("active", m==="full");
+  $("modeResync").classList.toggle("active", m==="resync");
+  const rs = m==="resync";
+  $("tgtField").style.display = rs ? "none" : "";
+  $("ttsCard").style.display = rs ? "none" : "";
+  $("modeHint").textContent = rs
+    ? "Translated SRT + uska audio (TTS/dubbed) do — SRT ki timings audio se match karke nayi SRT milegi. Na translation, na TTS — sirf sync."
+    : "Audio + uska SRT do → translate hoke re-timed SRT milega (chaaho to TTS dub bhi).";
+  $("audioDropTitle").textContent = rs ? "Audio (jiske saath sync karna hai)" : "Audio file";
+  $("audioDropSub").textContent = rs ? "TTS / dubbed / koi bhi audio — SRT isi se sync hogi" : "mp3 · wav · m4a · flac · mp4 · mkv … (koi size limit nahi — local hai)";
+  $("srtDropTitle").textContent = rs ? "SRT (jise sync karna hai)" : "Subtitle file (.srt / .vtt)";
+  $("srtDropSub").textContent = rs ? "e.g. translated SRT — text same rahega, sirf timings update hongi" : "Iske breaks exactly preserve honge";
+  $("runBtn").textContent = rs ? "🔁 Sync SRT ↔ Audio (100% local)" : "⚡ Transcribe · Re-time · Translate (100% local)";
+}
+
 
 function fillSelect(sel, list, saved){
   sel.innerHTML="";
@@ -357,6 +381,9 @@ function fillSelect(sel, list, saved){
   }
   if (saved && list.some(([c])=>c===saved)) sel.value=saved;
 }
+$("modeFull").onclick=()=>setMode("full");
+$("modeResync").onclick=()=>setMode("resync");
+
 fillSelect($("srcLang"), SRC_LANGS, localStorage.getItem("ssl_src")||"auto");
 fillSelect($("tgtLang"), TGT_LANGS, localStorage.getItem("ssl_tgt")||"hi");
 $("whisperModel").value = localStorage.getItem("ssl_model")||"large-v3";
@@ -679,7 +706,8 @@ $("runBtn").addEventListener("click", async ()=>{
     fd.append("src_lang", $("srcLang").value);
     fd.append("tgt_lang", $("tgtLang").value);
     fd.append("model_size", $("whisperModel").value);
-    if($("ttsEnable").checked){
+    fd.append("mode", state.mode);
+    if(state.mode!=="resync" && $("ttsEnable").checked){
       if(!$("ttsKey").value.trim()) throw new Error("TTS on hai — top-right 🔑 box me API key daalo");
       if(!selVoice) throw new Error("TTS on hai — pehle koi voice select karo (Saved / Library / Manual)");
       fd.append("tts_key", $("ttsKey").value.trim());
@@ -716,8 +744,12 @@ async function pollJob(id){
 function showResult(result){
   state.segments=result.segments;
   state.transcript=result.transcript;
+  state.resultMode=result.mode||"full";
+  const rs = state.resultMode==="resync";
   const tgt=$("tgtLang").value;
-  $("thTrans").textContent="Translated ("+(LANG_NAMES[tgt]||tgt)+")";
+  $("thTrans").textContent = rs ? "Text (editable)" : "Translated ("+(LANG_NAMES[tgt]||tgt)+")";
+  $("dlTranslated").textContent = rs ? "⬇ Synced SRT" : "⬇ Translated SRT";
+  $("dlRetimed").style.display = rs ? "none" : "";
   if(result.language){
     $("detectedBadge").hidden=false;
     $("detectedBadge").textContent="🔍 audio: "+result.language;
@@ -914,7 +946,9 @@ function download(name,content){
 const baseName=()=> (state.srtFile?state.srtFile.name:"subtitles").replace(/\.(srt|vtt)$/i,"");
 
 $("dlTranslated").addEventListener("click",()=>{
-  if(state.segments) download(`${baseName()}.${$("tgtLang").value}${gapTag()}.srt`, buildSrt(state.segments,"translated"));
+  if(!state.segments) return;
+  const tag = state.resultMode==="resync" ? "synced" : $("tgtLang").value;
+  download(`${baseName()}.${tag}${gapTag()}.srt`, buildSrt(state.segments,"translated"));
 });
 $("dlRetimed").addEventListener("click",()=>{
   if(state.segments) download(`${baseName()}.retimed${gapTag()}.srt`, buildSrt(state.segments,"text"));

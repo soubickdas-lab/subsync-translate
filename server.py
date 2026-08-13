@@ -9,6 +9,7 @@ FastAPI server:
 Run:  python server.py   (or start-local.bat)
 """
 
+import difflib
 import glob
 import json
 import os
@@ -278,6 +279,145 @@ def _enforce_monotonic(segments):
         prev_end = seg["newEnd"]
 
 
+# ---------------- DP alignment (VoxCap-style, TTS/dubbed audio ke liye robust) ----------------
+
+def _norm_tok(w):
+    # letters + numbers + combining marks (Hindi matras waghera) — baaki hatao
+    return "".join(c for c in w.lower() if unicodedata.category(c)[0] in ("L", "N", "M"))
+
+
+def align_lines_dp(lines, words):
+    """Har line ko audio ke word timestamps se align karo (edit-distance DP).
+
+    Fuzzy match — transcription ki chhoti galtiyan bhi match maani jaati hain.
+    Jo lines match na hui unhe gaps me char-proportion se bhar dete hain;
+    bahut kam match mile to poora audio hi proportionally bant jata hai
+    (TTS audio lines ko order me bolta hai, isliye ye bhi kaafi accurate hai).
+    Returns: (times [{start,end,matched}], stats)
+    """
+    n = len(lines)
+
+    def proportional(reason):
+        if not words:
+            return ([{"start": i * 2.0, "end": i * 2.0 + 2.0, "matched": False} for i in range(n)],
+                    {"matchedSegments": 0, "totalSegments": n, "wordMatchRatio": 0.0, "method": reason})
+        t0, t1 = words[0]["start"], words[-1]["end"]
+        span = max(t1 - t0, 0.01)
+        total = sum(len(l) for l in lines) or 1
+        out, acc = [], 0
+        for line in lines:
+            s = t0 + span * acc / total
+            acc += len(line)
+            e = t0 + span * acc / total
+            out.append({"start": round(s, 3), "end": round(e, 3), "matched": False})
+        return out, {"matchedSegments": 0, "totalSegments": n,
+                     "wordMatchRatio": 0.0, "method": reason}
+
+    script = [(li, _norm_tok(t)) for li, line in enumerate(lines)
+              for t in line.split()]
+    script = [(li, t) for li, t in script if t]
+    word_toks = [_norm_tok(w["word"]) for w in words]
+    S, M = len(script), len(word_toks)
+    if not script or not words:
+        return proportional("proportional-empty")
+    if S * M > 20_000_000:
+        return None, None  # caller greedy fallback use kare
+
+    _fuzzy = {}
+
+    def is_match(a, b):
+        if a == b:
+            return True
+        if not a or not b or abs(len(a) - len(b)) > max(2, len(a) // 2):
+            return False
+        hit = _fuzzy.get((a, b))
+        if hit is None:
+            hit = difflib.SequenceMatcher(None, a, b).ratio() >= 0.75
+            _fuzzy[(a, b)] = hit
+        return hit
+
+    prev = list(range(M + 1))
+    back = [[0] * (M + 1) for _ in range(S + 1)]  # 1=diag, 2=up(skip tok), 3=left(skip word)
+    for i in range(1, S + 1):
+        cur = [i] + [0] * M
+        back[i][0] = 2
+        tok = script[i - 1][1]
+        for j in range(1, M + 1):
+            wt = word_toks[j - 1]
+            if tok == wt:
+                sub = 0.0
+            elif is_match(tok, wt):
+                sub = 0.25
+            else:
+                sub = 1.0
+            diag = prev[j - 1] + sub
+            up = prev[j] + 1
+            left = cur[j - 1] + 1
+            best = min(diag, up, left)
+            cur[j] = best
+            back[i][j] = 1 if best == diag else (2 if best == up else 3)
+        prev = cur
+
+    spans = {}
+    exact = 0
+    i, j = S, M
+    while i > 0 or j > 0:
+        move = back[i][j] if i > 0 else 3
+        if move == 1:
+            li = script[i - 1][0]
+            spans.setdefault(li, [j - 1, j - 1])
+            spans[li][0] = min(spans[li][0], j - 1)
+            spans[li][1] = max(spans[li][1], j - 1)
+            if is_match(script[i - 1][1], word_toks[j - 1]):
+                exact += 1
+            i, j = i - 1, j - 1
+        elif move == 2:
+            i -= 1
+        else:
+            j -= 1
+
+    if exact / S < 0.3:
+        return proportional("proportional-lowmatch")
+
+    starts = [None] * n
+    ends = [None] * n
+    for li, (j0, j1) in spans.items():
+        starts[li] = words[j0]["start"]
+        ends[li] = words[j1]["end"]
+
+    audio_start, audio_end = words[0]["start"], words[-1]["end"]
+    k = 0
+    while k < n:
+        if starts[k] is not None:
+            k += 1
+            continue
+        run_start = k
+        while k < n and starts[k] is None:
+            k += 1
+        gap_s = ends[run_start - 1] if run_start > 0 else audio_start
+        gap_e = starts[k] if k < n else audio_end
+        total = sum(len(lines[x]) for x in range(run_start, k)) or 1
+        acc = 0
+        for x in range(run_start, k):
+            starts[x] = gap_s + (gap_e - gap_s) * acc / total
+            acc += len(lines[x])
+            ends[x] = gap_s + (gap_e - gap_s) * acc / total
+
+    times = []
+    prev_end = min(audio_start, starts[0])
+    matched_count = 0
+    for li in range(n):
+        s = max(starts[li], prev_end)
+        e = max(ends[li], s + 0.2)
+        prev_end = e
+        m = li in spans
+        if m:
+            matched_count += 1
+        times.append({"start": round(s, 3), "end": round(e, 3), "matched": m})
+    return times, {"matchedSegments": matched_count, "totalSegments": n,
+                   "wordMatchRatio": exact / S, "method": "dp"}
+
+
 # ---------------- translation ----------------
 
 def translate_texts(texts, src_iso, tgt_iso, log, on_progress):
@@ -433,16 +573,22 @@ def align_dub(segments, model, audio_path, tgt_lang, log, prog):
              f"Dubbed audio transcribe… {min(seg.end, duration):.0f}s / {duration:.0f}s")
     log(f"Dubbed audio: {len(words)} words, {duration:.0f}s.")
 
-    # align translated text against the dubbed audio's words
-    dub_segs = [{"start": s["newStart"], "end": s["newEnd"], "text": s["translated"]}
-                for s in segments]
-    stats = align_segments(dub_segs, words)
-    for s, d in zip(segments, dub_segs):
-        s["dubStart"] = d["newStart"]
-        s["dubEnd"] = d["newEnd"]
-        s["dubMatched"] = d["matched"]
-    log(f"Dubbed SRT: {stats['matchedSegments']}/{stats['totalSegments']} segments "
-        f"audio se timed (word match {stats['wordMatchRatio'] * 100:.0f}%).")
+    # align translated text against the dubbed audio's words (robust DP)
+    lines = [re.sub(r"\s+", " ", s["translated"]).strip() or "." for s in segments]
+    times, stats = align_lines_dp(lines, words)
+    if times is None:  # bahut bada input — greedy fallback
+        dub_segs = [{"start": s["newStart"], "end": s["newEnd"], "text": s["translated"]}
+                    for s in segments]
+        stats = align_segments(dub_segs, words)
+        times = [{"start": d["newStart"], "end": d["newEnd"], "matched": d["matched"]}
+                 for d in dub_segs]
+        stats["method"] = "greedy"
+    for s, tm in zip(segments, times):
+        s["dubStart"] = tm["start"]
+        s["dubEnd"] = tm["end"]
+        s["dubMatched"] = tm["matched"]
+    log(f"Dubbed SRT ({stats.get('method', 'dp')}): {stats['matchedSegments']}/{stats['totalSegments']} "
+        f"segments audio se timed (word match {stats['wordMatchRatio'] * 100:.0f}%).")
     return stats, duration
 
 
@@ -452,7 +598,7 @@ JOBS = {}
 _job_lock = threading.Lock()  # one heavy job at a time
 
 
-def run_job(job_id, audio_path, srt_text, src_lang, tgt_lang, model_size, tts=None):
+def run_job(job_id, audio_path, srt_text, src_lang, tgt_lang, model_size, tts=None, mode="full"):
     job = JOBS[job_id]
 
     def log(msg):
@@ -500,6 +646,36 @@ def run_job(job_id, audio_path, srt_text, src_lang, tgt_lang, model_size, tts=No
                      f"Transcribing… {min(seg.end, duration):.0f}s / {duration:.0f}s")
             transcript = " ".join(transcript_parts)
             log(f"Whisper returned {len(words)} words.")
+
+            if mode == "resync":
+                # sirf re-time: SRT text ko audio se match karo, translation/TTS nahi
+                prog(60, "SRT ko audio ke saath sync kiya ja raha hai…")
+                lines = [re.sub(r"\s+", " ", s["text"]).strip() or "." for s in segments]
+                times, stats = align_lines_dp(lines, words)
+                if times is None:
+                    stats = align_segments(segments, words)
+                    stats["method"] = "greedy"
+                else:
+                    for s, tm in zip(segments, times):
+                        s["newStart"] = tm["start"]
+                        s["newEnd"] = tm["end"]
+                        s["matched"] = tm["matched"]
+                for s in segments:
+                    s["translated"] = s["text"]
+                log(f"Re-sync ({stats.get('method', 'dp')}): {stats['matchedSegments']}/{stats['totalSegments']} "
+                    f"segments audio se timed (word match {stats['wordMatchRatio'] * 100:.0f}%).")
+                job["result"] = {
+                    "language": detected,
+                    "stats": stats,
+                    "segments": segments,
+                    "transcript": transcript,
+                    "dub": None,
+                    "mode": "resync",
+                }
+                prog(100, "Done ✔")
+                job["status"] = "done"
+                log("Done.")
+                return
 
             prog(56, "Aligning subtitle segments to audio…")
             stats = align_segments(segments, words)
@@ -571,7 +747,7 @@ async def no_cache_html(request, call_next):
 
 @app.get("/api/info")
 def api_info():
-    return {"device": DEVICE, "cuda": CUDA, "version": "1.6-local"}
+    return {"device": DEVICE, "cuda": CUDA, "version": "1.7-local"}
 
 
 # ---- live system stats (CPU / RAM / GPU / VRAM, in %) ----
@@ -659,6 +835,7 @@ async def create_job(
     tts_key: str = Form(""),
     tts_voice: str = Form(""),
     tts_speed: str = Form("1"),
+    mode: str = Form("full"),
 ):
     if upload_id:
         up = UPLOADS.pop(upload_id, None)
@@ -682,15 +859,17 @@ async def create_job(
         model_size = "large-v3"
 
     tts = None
-    if tts_key.strip() and tts_voice.strip():
+    if mode != "resync" and tts_key.strip() and tts_voice.strip():
         tts = {"key": tts_key.strip(), "voice": tts_voice.strip(), "speed": tts_speed or "1"}
+    if mode not in {"full", "resync"}:
+        mode = "full"
 
     job_id = uuid.uuid4().hex[:12]
     JOBS[job_id] = {"status": "queued", "progress": 0, "message": "Queued…",
                     "log": [], "result": None, "error": None}
     threading.Thread(
         target=run_job,
-        args=(job_id, tmp_path, srt_text, src_lang, tgt_lang, model_size, tts),
+        args=(job_id, tmp_path, srt_text, src_lang, tgt_lang, model_size, tts, mode),
         daemon=True,
     ).start()
     return {"id": job_id}

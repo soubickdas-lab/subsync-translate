@@ -1,11 +1,11 @@
 ==================================================
- SubSync Translate — VERSION 1.6
+ SubSync Translate — VERSION 1.7
  Release date: 09 August 2026
 ==================================================
 
 Ye file batati hai ki aapke paas konsa version installed hai.
 Naya update aane par is file ka naam badal jayega
-(version 1.7, version 1.8 ...) — update.bat chalane ke baad
+(version 1.8, version 1.9 ...) — update.bat chalane ke baad
 yahi file check karo.
 
 --------------------------------------------------
@@ -68,9 +68,25 @@ yahi file check karo.
     sab original timings par wapas (undo). Gap-filled state me SRT
     download karo to filename ke last me " gap-filled" likha aata hai
 
+18. RE-SYNC MODE (naya tab upar) — translated SRT + uska audio do,
+    bas timings audio se match hokar nayi "synced" SRT milti hai.
+    Na translation hoti hai na TTS — sirf pure sync.
+19. DUBBED SRT SYNC FIX — ab robust DP (edit-distance) alignment:
+    fuzzy word matching, missing lines char-proportional fill,
+    Hindi/Devanagari matras ka proper handling. Dubbed audio se
+    SRT ab properly sync hota hai.
+
 --------------------------------------------------
  CHANGELOG
 --------------------------------------------------
+[Version 1.7] - 09 Aug 2026
+  + RE-SYNC ONLY mode: SRT ↔ Audio — translated SRT ki timings
+    kisi bhi audio (TTS/dubbed) se match karke "synced" SRT
+  + Dubbed SRT sync FIX: VoxCap-style DP alignment (fuzzy match,
+    char-proportional fill, proportional fallback)
+  + Devanagari/Hindi tokenization bug fix (matras ki wajah se
+    words match nahi hote the)
+
 [Version 1.6] - 09 Aug 2026
   + Modern custom player (round play/pause, styled seek bar, time)
   + Player me time PROPER SRT FORMAT me: current 00:00:03,456 (highlighted)
