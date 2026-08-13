@@ -137,7 +137,7 @@ def get_nllb(log):
 
 # ---------------- subtitle parsing / helpers ----------------
 
-TIME_RE = re.compile(r"^(?:(\d+):)?(\d+):(\d+)[.,](\d{1,3})$")
+TIME_RE = re.compile(r"^(?:(\d+):)?(\d+):(\d+)[.,](\d{1,4})$")
 
 
 def parse_time(t):
@@ -145,7 +145,10 @@ def parse_time(t):
     if not m:
         raise ValueError(f"bad timestamp: {t}")
     h = int(m.group(1) or 0)
-    return h * 3600 + int(m.group(2)) * 60 + int(m.group(3)) + int(m.group(4).ljust(3, "0")) / 1000.0
+    ms_str = m.group(4)
+    # kuch tools ",1000" (4-digit ms) likh dete hain — usse 1 pura second maano
+    ms = int(ms_str.ljust(3, "0")) if len(ms_str) <= 3 else int(ms_str)
+    return h * 3600 + int(m.group(2)) * 60 + int(m.group(3)) + ms / 1000.0
 
 
 def parse_subtitle(raw):
@@ -286,6 +289,71 @@ def _norm_tok(w):
     return "".join(c for c in w.lower() if unicodedata.category(c)[0] in ("L", "N", "M"))
 
 
+def _proportional_times(lines, words, reason):
+    """Kuch match hi na ho to poore audio ko line-length ke hisaab se baant do."""
+    n = len(lines)
+    if not words:
+        return ([{"start": i * 2.0, "end": i * 2.0 + 2.0, "matched": False} for i in range(n)],
+                {"matchedSegments": 0, "totalSegments": n, "wordMatchRatio": 0.0, "method": reason})
+    t0, t1 = words[0]["start"], words[-1]["end"]
+    span = max(t1 - t0, 0.01)
+    total = sum(len(l) for l in lines) or 1
+    out, acc = [], 0
+    for line in lines:
+        s = t0 + span * acc / total
+        acc += len(line)
+        e = t0 + span * acc / total
+        out.append({"start": round(s, 3), "end": round(e, 3), "matched": False})
+    return out, {"matchedSegments": 0, "totalSegments": n,
+                 "wordMatchRatio": 0.0, "method": reason}
+
+
+def _spans_to_times(lines, words, spans, ratio, method):
+    """Matched word-spans -> final timings. Jo lines match nahi hui unhe
+    aas-paas ke matched lines ke beech char-proportion se bhar dete hain,
+    phir monotonic + non-overlapping bana dete hain."""
+    n = len(lines)
+    starts = [None] * n
+    ends = [None] * n
+    for li, (j0, j1) in spans.items():
+        starts[li] = words[j0]["start"]
+        ends[li] = words[j1]["end"]
+
+    audio_start, audio_end = words[0]["start"], words[-1]["end"]
+    k = 0
+    while k < n:
+        if starts[k] is not None:
+            k += 1
+            continue
+        run_start = k
+        while k < n and starts[k] is None:
+            k += 1
+        gap_s = ends[run_start - 1] if run_start > 0 else audio_start
+        gap_e = starts[k] if k < n else audio_end
+        if gap_e < gap_s:
+            gap_e = gap_s
+        total = sum(len(lines[x]) for x in range(run_start, k)) or 1
+        acc = 0
+        for x in range(run_start, k):
+            starts[x] = gap_s + (gap_e - gap_s) * acc / total
+            acc += len(lines[x])
+            ends[x] = gap_s + (gap_e - gap_s) * acc / total
+
+    times = []
+    prev_end = min(audio_start, starts[0])
+    matched_count = 0
+    for li in range(n):
+        s = max(starts[li], prev_end)
+        e = max(ends[li], s + 0.2)
+        prev_end = e
+        m = li in spans
+        if m:
+            matched_count += 1
+        times.append({"start": round(s, 3), "end": round(e, 3), "matched": m})
+    return times, {"matchedSegments": matched_count, "totalSegments": n,
+                   "wordMatchRatio": ratio, "method": method}
+
+
 def align_lines_dp(lines, words):
     """Har line ko audio ke word timestamps se align karo (edit-distance DP).
 
@@ -296,32 +364,15 @@ def align_lines_dp(lines, words):
     Returns: (times [{start,end,matched}], stats)
     """
     n = len(lines)
-
-    def proportional(reason):
-        if not words:
-            return ([{"start": i * 2.0, "end": i * 2.0 + 2.0, "matched": False} for i in range(n)],
-                    {"matchedSegments": 0, "totalSegments": n, "wordMatchRatio": 0.0, "method": reason})
-        t0, t1 = words[0]["start"], words[-1]["end"]
-        span = max(t1 - t0, 0.01)
-        total = sum(len(l) for l in lines) or 1
-        out, acc = [], 0
-        for line in lines:
-            s = t0 + span * acc / total
-            acc += len(line)
-            e = t0 + span * acc / total
-            out.append({"start": round(s, 3), "end": round(e, 3), "matched": False})
-        return out, {"matchedSegments": 0, "totalSegments": n,
-                     "wordMatchRatio": 0.0, "method": reason}
-
     script = [(li, _norm_tok(t)) for li, line in enumerate(lines)
               for t in line.split()]
     script = [(li, t) for li, t in script if t]
     word_toks = [_norm_tok(w["word"]) for w in words]
     S, M = len(script), len(word_toks)
     if not script or not words:
-        return proportional("proportional-empty")
+        return _proportional_times(lines, words, "proportional-empty")
     if S * M > 20_000_000:
-        return None, None  # caller greedy fallback use kare
+        return None, None  # caller chunked aligner use kare
 
     _fuzzy = {}
 
@@ -377,45 +428,59 @@ def align_lines_dp(lines, words):
             j -= 1
 
     if exact / S < 0.3:
-        return proportional("proportional-lowmatch")
+        return _proportional_times(lines, words, "proportional-lowmatch")
 
-    starts = [None] * n
-    ends = [None] * n
-    for li, (j0, j1) in spans.items():
-        starts[li] = words[j0]["start"]
-        ends[li] = words[j1]["end"]
+    return _spans_to_times(lines, words, spans, exact / S, "dp")
 
-    audio_start, audio_end = words[0]["start"], words[-1]["end"]
-    k = 0
-    while k < n:
-        if starts[k] is not None:
-            k += 1
+
+def align_lines_blocks(lines, words):
+    """Lambi files (ghanton ka audio, hazaaron lines) ke liye tez alignment.
+
+    Poore O(S*M) DP ki jagah difflib ke matching blocks (C-speed) nikaalte
+    hain — blocks hamesha badhte kram me aate hain, isliye alignment
+    monotonic rehta hai. 2 ghante ke audio par bhi ~2 second lagte hain.
+    """
+    script = [(li, t) for li, ln in enumerate(lines)
+              for t in (_norm_tok(x) for x in ln.split()) if t]
+    kept = [(i, _norm_tok(w["word"])) for i, w in enumerate(words)]
+    kept = [(i, t) for i, t in kept if t]
+    if not script or not kept:
+        return _proportional_times(lines, words, "proportional-empty")
+
+    w_idx = [i for i, _ in kept]
+    s_toks = [t for _, t in script]
+    w_toks = [t for _, t in kept]
+
+    sm = difflib.SequenceMatcher(None, s_toks, w_toks, autojunk=False)
+    spans, matched = {}, 0
+    for i, j, size in sm.get_matching_blocks():
+        if not size:
             continue
-        run_start = k
-        while k < n and starts[k] is None:
-            k += 1
-        gap_s = ends[run_start - 1] if run_start > 0 else audio_start
-        gap_e = starts[k] if k < n else audio_end
-        total = sum(len(lines[x]) for x in range(run_start, k)) or 1
-        acc = 0
-        for x in range(run_start, k):
-            starts[x] = gap_s + (gap_e - gap_s) * acc / total
-            acc += len(lines[x])
-            ends[x] = gap_s + (gap_e - gap_s) * acc / total
+        matched += size
+        for k in range(size):
+            li = script[i + k][0]
+            wj = w_idx[j + k]
+            sp = spans.get(li)
+            if sp is None:
+                spans[li] = [wj, wj]
+            else:
+                if wj < sp[0]:
+                    sp[0] = wj
+                if wj > sp[1]:
+                    sp[1] = wj
 
-    times = []
-    prev_end = min(audio_start, starts[0])
-    matched_count = 0
-    for li in range(n):
-        s = max(starts[li], prev_end)
-        e = max(ends[li], s + 0.2)
-        prev_end = e
-        m = li in spans
-        if m:
-            matched_count += 1
-        times.append({"start": round(s, 3), "end": round(e, 3), "matched": m})
-    return times, {"matchedSegments": matched_count, "totalSegments": n,
-                   "wordMatchRatio": exact / S, "method": "dp"}
+    ratio = matched / len(s_toks)
+    if ratio < 0.15:
+        return _proportional_times(lines, words, "proportional-lowmatch")
+    return _spans_to_times(lines, words, spans, ratio, "blocks")
+
+
+def align_lines(lines, words):
+    """Dispatcher — chhote inputs par fuzzy DP, bade par difflib blocks."""
+    times, stats = align_lines_dp(lines, words)
+    if times is None:
+        return align_lines_blocks(lines, words)
+    return times, stats
 
 
 # ---------------- translation ----------------
@@ -601,14 +666,7 @@ def align_dub(segments, model, audio_path, tgt_lang, log, prog):
 
     # align translated text against the dubbed audio's words (robust DP)
     lines = [re.sub(r"\s+", " ", s["translated"]).strip() or "." for s in segments]
-    times, stats = align_lines_dp(lines, words)
-    if times is None:  # bahut bada input — greedy fallback
-        dub_segs = [{"start": s["newStart"], "end": s["newEnd"], "text": s["translated"]}
-                    for s in segments]
-        stats = align_segments(dub_segs, words)
-        times = [{"start": d["newStart"], "end": d["newEnd"], "matched": d["matched"]}
-                 for d in dub_segs]
-        stats["method"] = "greedy"
+    times, stats = align_lines(lines, words)
     for s, tm in zip(segments, times):
         s["dubStart"] = tm["start"]
         s["dubEnd"] = tm["end"]
@@ -677,15 +735,11 @@ def run_job(job_id, audio_path, srt_text, src_lang, tgt_lang, model_size, tts=No
                 # sirf re-time: SRT text ko audio se match karo, translation/TTS nahi
                 prog(60, "SRT ko audio ke saath sync kiya ja raha hai…")
                 lines = [re.sub(r"\s+", " ", s["text"]).strip() or "." for s in segments]
-                times, stats = align_lines_dp(lines, words)
-                if times is None:
-                    stats = align_segments(segments, words)
-                    stats["method"] = "greedy"
-                else:
-                    for s, tm in zip(segments, times):
-                        s["newStart"] = tm["start"]
-                        s["newEnd"] = tm["end"]
-                        s["matched"] = tm["matched"]
+                times, stats = align_lines(lines, words)
+                for s, tm in zip(segments, times):
+                    s["newStart"] = tm["start"]
+                    s["newEnd"] = tm["end"]
+                    s["matched"] = tm["matched"]
                 for s in segments:
                     s["translated"] = s["text"]
                 log(f"Re-sync ({stats.get('method', 'dp')}): {stats['matchedSegments']}/{stats['totalSegments']} "
@@ -773,7 +827,7 @@ async def no_cache_html(request, call_next):
 
 @app.get("/api/info")
 def api_info():
-    return {"device": DEVICE, "cuda": CUDA, "version": "1.8-local"}
+    return {"device": DEVICE, "cuda": CUDA, "version": "1.9-local"}
 
 
 # ---- live system stats (CPU / RAM / GPU / VRAM, in %) ----

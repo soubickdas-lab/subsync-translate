@@ -1,11 +1,11 @@
 ==================================================
- SubSync Translate — VERSION 1.8
- Release date: 09 August 2026
+ SubSync Translate — VERSION 1.9
+ Release date: 10 August 2026
 ==================================================
 
 Ye file batati hai ki aapke paas konsa version installed hai.
 Naya update aane par is file ka naam badal jayega
-(version 1.9, version 2.0 ...) — update.bat chalane ke baad
+(version 2.0, version 2.1 ...) — update.bat chalane ke baad
 yahi file check karo.
 
 --------------------------------------------------
@@ -86,6 +86,17 @@ yahi file check karo.
 --------------------------------------------------
  CHANGELOG
 --------------------------------------------------
+[Version 1.9] - 10 Aug 2026
+  * FIX "bad timestamp" error — kuch SRT me ",1000" jaisa 4-digit
+    milliseconds hota hai (00:02:20,1000). Ab wo bhi parse hota hai
+    (= 1 pura second), file reject nahi hoti
+  * BADA SYNC FIX lambi files ke liye — pehle ghanton wale audio /
+    hazaaron lines par accurate DP skip hokar kamzor greedy matching
+    chalti thi (isi se timings galat aa rahi thi). Ab difflib blocks
+    wala fast aligner chalta hai: 2 ghante ka audio + 1700 lines
+    ~2 second me, har line audio ke exact word par set hoti hai
+  * Chhoti files par pehle jaisa fuzzy DP hi chalta hai (best quality)
+
 [Version 1.8] - 09 Aug 2026
   + Server-side default TTS key (secrets.json, gitignored) +
     password gate — TTS tick par password prompt, galat par deny
