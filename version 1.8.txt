@@ -1,11 +1,11 @@
 ==================================================
- SubSync Translate — VERSION 1.7
+ SubSync Translate — VERSION 1.8
  Release date: 09 August 2026
 ==================================================
 
 Ye file batati hai ki aapke paas konsa version installed hai.
 Naya update aane par is file ka naam badal jayega
-(version 1.8, version 1.9 ...) — update.bat chalane ke baad
+(version 1.9, version 2.0 ...) — update.bat chalane ke baad
 yahi file check karo.
 
 --------------------------------------------------
@@ -76,9 +76,22 @@ yahi file check karo.
     Hindi/Devanagari matras ka proper handling. Dubbed audio se
     SRT ab properly sync hota hai.
 
+20. TTS PASSWORD GATE — server par default ai33.pro API key rakhi ja
+    sakti hai (secrets.json me — git me KABHI push nahi hoti).
+    "Dubbed Audio (TTS)" tick karte hi password poocha jata hai;
+    sahi password par server ki key use hoti hai (key browser tak
+    kabhi nahi jaati). Apni khud ki key daalo to password ki
+    zaroorat nahi.
+
 --------------------------------------------------
  CHANGELOG
 --------------------------------------------------
+[Version 1.8] - 09 Aug 2026
+  + Server-side default TTS key (secrets.json, gitignored) +
+    password gate — TTS tick par password prompt, galat par deny
+  + /api/tts/* aur job requests ab password ya apni key dono
+    accept karte hain; key kabhi client ko nahi bheji jaati
+
 [Version 1.7 fix] - 09 Aug 2026
   * Re-sync button kaam nahi kar raha tha — TTS tabs ka wiring mode
     buttons ka click overwrite kar deta tha (fixed, scoped)

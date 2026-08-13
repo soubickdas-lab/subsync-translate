@@ -494,6 +494,32 @@ socket.getaddrinfo = _patched_getaddrinfo
 
 AI33 = "https://api.ai33.pro"
 
+# secrets.json (gitignored — kabhi push nahi hota): {"ai33_key": "...", "tts_password": "..."}
+SECRETS_FILE = BASE / "secrets.json"
+
+
+def _secrets():
+    try:
+        return json.loads(SECRETS_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def resolve_tts_key(provided_key: str, password: str):
+    """User ki apni key ho to wahi; warna sahi password par server ki default key.
+    Returns (key | None, error | None)."""
+    provided_key = (provided_key or "").strip()
+    if provided_key:
+        return provided_key, None
+    sec = _secrets()
+    default_key = (sec.get("ai33_key") or "").strip()
+    real_pass = (sec.get("tts_password") or "").strip()
+    if not default_key:
+        return None, "no key: apni ai33.pro API key daalo (top-right 🔑)"
+    if not real_pass or (password or "").strip() != real_pass:
+        return None, "wrong password"
+    return default_key, None
+
 # target UI code -> whisper language code (for re-transcribing the dubbed audio)
 WHISPER_CODE = {"zh-CN": "zh", "zh-TW": "zh", "fil": "tl"}
 
@@ -747,7 +773,7 @@ async def no_cache_html(request, call_next):
 
 @app.get("/api/info")
 def api_info():
-    return {"device": DEVICE, "cuda": CUDA, "version": "1.7-local"}
+    return {"device": DEVICE, "cuda": CUDA, "version": "1.8-local"}
 
 
 # ---- live system stats (CPU / RAM / GPU / VRAM, in %) ----
@@ -835,6 +861,7 @@ async def create_job(
     tts_key: str = Form(""),
     tts_voice: str = Form(""),
     tts_speed: str = Form("1"),
+    tts_pass: str = Form(""),
     mode: str = Form("full"),
 ):
     if upload_id:
@@ -859,8 +886,15 @@ async def create_job(
         model_size = "large-v3"
 
     tts = None
-    if mode != "resync" and tts_key.strip() and tts_voice.strip():
-        tts = {"key": tts_key.strip(), "voice": tts_voice.strip(), "speed": tts_speed or "1"}
+    if mode != "resync" and tts_voice.strip():
+        key, err = resolve_tts_key(tts_key, tts_pass)
+        if err:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            return JSONResponse({"error": "TTS: " + err}, status_code=401)
+        tts = {"key": key, "voice": tts_voice.strip(), "speed": tts_speed or "1"}
     if mode not in {"full", "resync"}:
         mode = "full"
 
@@ -885,7 +919,10 @@ def get_output(filename: str):
 
 @app.get("/api/tts/voices")
 def tts_voices(request: Request, provider: str = "edge", q: str = "", language: str = ""):
-    key = request.headers.get("x-tts-key", "")
+    key, err = resolve_tts_key(request.headers.get("x-tts-key", ""),
+                               request.headers.get("x-tts-pass", ""))
+    if err:
+        return JSONResponse({"success": False, "error": err}, status_code=401)
     params = {"provider": provider, "page_size": 100}
     if q:
         params["q"] = q
@@ -901,7 +938,10 @@ def tts_voices(request: Request, provider: str = "edge", q: str = "", language: 
 
 @app.get("/api/tts/credits")
 def tts_credits(request: Request):
-    key = request.headers.get("x-tts-key", "")
+    key, err = resolve_tts_key(request.headers.get("x-tts-key", ""),
+                               request.headers.get("x-tts-pass", ""))
+    if err:
+        return JSONResponse({"success": False, "error": err}, status_code=401)
     try:
         r = requests.get(f"{AI33}/v1/credits", headers={"xi-api-key": key}, timeout=30)
         return JSONResponse(r.json(), status_code=r.status_code)

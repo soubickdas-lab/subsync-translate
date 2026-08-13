@@ -200,7 +200,7 @@ footer{text-align:center;color:var(--muted);font-size:.78rem;margin-top:10px}
 
   <section class="card" id="ttsCard">
     <h2><span class="step">3</span> Dubbed Audio (TTS)</h2>
-    <p class="hint">Translated text se <b>naya audio</b> banega (ai33.pro / OpenSpeaker) aur uska <b>naya SRT</b> — same breaks, new audio ke timings ke saath. API key top-right me 🔑 box me daalo (ek baar — saved rahegi). Key yahan se milegi: <a href="https://ai33.pro/app/api-document" target="_blank" rel="noopener">ai33.pro</a></p>
+    <p class="hint">Translated text se <b>naya audio</b> banega (ai33.pro / OpenSpeaker) aur uska <b>naya SRT</b> — same breaks, new audio ke timings ke saath. Tick karne par <b>password</b> poocha jayega — ya apni khud ki API key top-right 🔑 box me daalo (<a href="https://ai33.pro/app/api-document" target="_blank" rel="noopener">ai33.pro</a>).</p>
     <label style="display:flex;align-items:center;gap:10px;margin-bottom:14px;cursor:pointer">
       <input type="checkbox" id="ttsEnable" style="width:18px;height:18px;accent-color:var(--accent)">
       <b>Naya audio bhi banao (TTS dubbing)</b>
@@ -482,12 +482,57 @@ $("ttsKey").value = localStorage.getItem("ssl_tts_key")||"";
 $("ttsKey").oninput = ()=>localStorage.setItem("ssl_tts_key", $("ttsKey").value.trim());
 $("ttsKey").onchange = refreshCredits;
 
+// ---- TTS auth: apni key ho to wahi, warna password se server ki default key ----
+const ttsAuth = { pass: localStorage.getItem("ssl_tts_pass")||"" };
+function ttsHeaders(){
+  const h={};
+  const k=$("ttsKey").value.trim();
+  if(k) h["x-tts-key"]=k;
+  if(ttsAuth.pass) h["x-tts-pass"]=ttsAuth.pass;
+  return h;
+}
+async function verifyTtsAuth(){
+  try{
+    const res=await fetch("/api/tts/credits",{headers:ttsHeaders()});
+    if(res.status===401) return false;
+    const d=await res.json();
+    if(d.credits!==undefined){
+      $("creditsBadge").hidden=false;
+      $("creditsBadge").textContent=`💰 ${d.credits} credits`;
+    }
+    return true;
+  }catch(e){ return true; } // network issue — block mat karo
+}
+async function ensureTtsAuth(){
+  if($("ttsKey").value.trim()) return true;         // apni key — password ki zaroorat nahi
+  if(ttsAuth.pass && await verifyTtsAuth()) return true;
+  const p=prompt("🔒 TTS password daalo:");
+  if(p===null) return false;
+  ttsAuth.pass=p.trim();
+  if(await verifyTtsAuth()){
+    localStorage.setItem("ssl_tts_pass", ttsAuth.pass);
+    return true;
+  }
+  ttsAuth.pass="";
+  localStorage.removeItem("ssl_tts_pass");
+  alert("❌ Galat password");
+  return false;
+}
+
 $("ttsEnable").checked = localStorage.getItem("ssl_tts_on")==="1";
 $("ttsOptions").hidden = !$("ttsEnable").checked;
-$("ttsEnable").onchange = ()=>{
+$("ttsEnable").onchange = async ()=>{
+  if($("ttsEnable").checked){
+    const ok = await ensureTtsAuth();
+    if(!ok){
+      $("ttsEnable").checked=false;
+      localStorage.setItem("ssl_tts_on","0");
+      $("ttsOptions").hidden=true;
+      return;
+    }
+  }
   localStorage.setItem("ssl_tts_on", $("ttsEnable").checked?"1":"0");
   $("ttsOptions").hidden = !$("ttsEnable").checked;
-  if($("ttsEnable").checked) refreshCredits();
 };
 
 $("ttsProvider").value = localStorage.getItem("ssl_tts_provider")||"edge";
@@ -496,17 +541,10 @@ $("ttsSpeed").value = localStorage.getItem("ssl_tts_speed")||"1";
 $("ttsSpeed").onchange = ()=>localStorage.setItem("ssl_tts_speed", $("ttsSpeed").value);
 
 async function refreshCredits(){
-  const key=$("ttsKey").value.trim();
-  if(!key){ $("creditsBadge").hidden=true; return; }
-  try{
-    const d=await (await fetch("/api/tts/credits",{headers:{"x-tts-key":key}})).json();
-    if(d.credits!==undefined){
-      $("creditsBadge").hidden=false;
-      $("creditsBadge").textContent=`💰 ${d.credits} credits`;
-    }
-  }catch(e){}
+  if(!$("ttsKey").value.trim() && !ttsAuth.pass){ $("creditsBadge").hidden=true; return; }
+  await verifyTtsAuth();
 }
-if($("ttsEnable").checked && $("ttsKey").value) refreshCredits();
+if($("ttsEnable").checked && ($("ttsKey").value || ttsAuth.pass)) refreshCredits();
 
 // ---- tabs ----
 const TTS_TABS = {saved:"ttsTabSaved", library:"ttsTabLibrary", manual:"ttsTabManual"};
@@ -623,15 +661,14 @@ function renderLibrary(){
 }
 
 $("ttsLoadVoices").onclick = async ()=>{
-  const key=$("ttsKey").value.trim();
-  if(!key){ alert("Pehle top-right 🔑 box me ai33.pro API key daalo"); return; }
+  if(!(await ensureTtsAuth())) return;
   $("ttsLoadVoices").disabled=true;
   $("ttsLoadVoices").textContent="Loading…";
   try{
     const params=new URLSearchParams({provider:$("ttsProvider").value});
     const lang=$("ttsLangFilter").value.trim();
     if(lang) params.set("language", lang);
-    const d=await (await fetch("/api/tts/voices?"+params,{headers:{"x-tts-key":key}})).json();
+    const d=await (await fetch("/api/tts/voices?"+params,{headers:ttsHeaders()})).json();
     if(!d.data) throw new Error(d.error||d.message||JSON.stringify(d).slice(0,200));
     libVoices=d.data;
     renderLibrary();
@@ -718,9 +755,10 @@ $("runBtn").addEventListener("click", async ()=>{
     fd.append("model_size", $("whisperModel").value);
     fd.append("mode", state.mode);
     if(state.mode!=="resync" && $("ttsEnable").checked){
-      if(!$("ttsKey").value.trim()) throw new Error("TTS on hai — top-right 🔑 box me API key daalo");
       if(!selVoice) throw new Error("TTS on hai — pehle koi voice select karo (Saved / Library / Manual)");
+      if(!$("ttsKey").value.trim() && !ttsAuth.pass) throw new Error("TTS on hai — password daalo (TTS checkbox dobara tick karo) ya apni API key daalo");
       fd.append("tts_key", $("ttsKey").value.trim());
+      fd.append("tts_pass", ttsAuth.pass);
       fd.append("tts_voice", selVoice.voice_id);
       fd.append("tts_speed", $("ttsSpeed").value||"1");
     }

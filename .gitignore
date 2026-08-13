@@ -1,6 +1,7 @@
 venv/
 .claude/
 *.wav
+secrets.json
 models/
 tmp/
 outputs/
