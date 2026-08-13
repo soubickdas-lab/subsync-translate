@@ -9,8 +9,16 @@
 :root {
   --bg:#0b0e14; --card:#131824; --card2:#1a2132; --border:#26304a;
   --text:#e8ecf5; --muted:#8b96ad; --accent:#7c5cff; --accent2:#4dd0e1;
+  --accent3:#5b3df5; --accent-soft:rgba(124,92,255,.12);
   --ok:#3ddc84; --warn:#ffb74d; --err:#ff6b6b; --radius:14px; font-size:15px;
 }
+/* RE-SYNC MODE — alag orange theme taaki full mode se clearly alag dikhe */
+body.resync {
+  --accent:#ff9f43; --accent2:#ffd75e; --accent3:#e07b00;
+  --accent-soft:rgba(255,159,67,.16); --border:#4a3a26;
+}
+body.resync{background:radial-gradient(1200px 600px at 80% -10%,#402a14 0%,var(--bg) 55%) fixed,var(--bg)}
+body.resync .pbtn{box-shadow:0 4px 14px rgba(255,159,67,.4)}
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:radial-gradient(1200px 600px at 80% -10%,#1c1440 0%,var(--bg) 55%) fixed,var(--bg);color:var(--text);font-family:"Segoe UI",system-ui,sans-serif;min-height:100vh}
 .topbar{display:flex;align-items:center;justify-content:space-between;padding:22px 28px;max-width:1100px;margin:0 auto}
@@ -25,7 +33,7 @@ body{background:radial-gradient(1200px 600px at 80% -10%,#1c1440 0%,var(--bg) 55
 .key-row input{background:transparent;border:none;outline:none;color:var(--text);font-family:ui-monospace,Consolas,monospace;font-size:.75rem;width:170px}
 .tts-tabs{display:flex;gap:8px;margin-bottom:14px}
 .tts-tab{border:1px solid var(--border);background:var(--card2);color:var(--muted);padding:8px 16px;border-radius:10px;font-size:.85rem;font-weight:600;cursor:pointer;transition:.2s}
-.tts-tab.active{border-color:var(--accent);color:var(--text);background:rgba(124,92,255,.12)}
+.tts-tab.active{border-color:var(--accent);color:var(--text);background:var(--accent-soft)}
 .voice-list{border:1px solid var(--border);border-radius:10px;max-height:300px;overflow-y:auto}
 .voice-row{display:flex;align-items:center;gap:10px;padding:9px 12px;border-bottom:1px solid #1d2436;font-size:.85rem}
 .voice-row:last-child{border-bottom:none}
@@ -80,7 +88,7 @@ select:focus{border-color:var(--accent)}
 .btn{border:1px solid var(--border);background:var(--card2);color:var(--text);padding:11px 20px;border-radius:10px;font-size:.92rem;font-weight:600;cursor:pointer;transition:.2s}
 .btn:hover:not(:disabled){border-color:var(--accent);transform:translateY(-1px)}
 .btn:disabled{opacity:.45;cursor:not-allowed}
-.btn.primary{background:linear-gradient(135deg,var(--accent),#5b3df5);border-color:transparent;color:#fff}
+.btn.primary{background:linear-gradient(135deg,var(--accent),var(--accent3));border-color:transparent;color:#fff}
 .btn.primary:hover:not(:disabled){filter:brightness(1.12)}
 .btn.ghost{background:transparent}
 .btn.big{width:100%;padding:15px;font-size:1.02rem}
@@ -358,18 +366,19 @@ const state = { audio:null, srtFile:null, segments:null, transcript:"", mode:"fu
 // ---- mode: full pipeline vs re-sync only ----
 function setMode(m){
   state.mode=m;
+  document.body.classList.toggle("resync", m==="resync");
   $("modeFull").classList.toggle("active", m==="full");
   $("modeResync").classList.toggle("active", m==="resync");
   const rs = m==="resync";
   $("tgtField").style.display = rs ? "none" : "";
   $("ttsCard").style.display = rs ? "none" : "";
   $("modeHint").textContent = rs
-    ? "Translated SRT + uska audio (TTS/dubbed) do — SRT ki timings audio se match karke nayi SRT milegi. Na translation, na TTS — sirf sync."
+    ? "🔁 RE-SYNC MODE: Translated audio + translated SRT do — SRT ki timings audio se match hokar nayi synced SRT milegi. Na translation, na TTS — sirf sync."
     : "Audio + uska SRT do → translate hoke re-timed SRT milega (chaaho to TTS dub bhi).";
-  $("audioDropTitle").textContent = rs ? "Audio (jiske saath sync karna hai)" : "Audio file";
-  $("audioDropSub").textContent = rs ? "TTS / dubbed / koi bhi audio — SRT isi se sync hogi" : "mp3 · wav · m4a · flac · mp4 · mkv … (koi size limit nahi — local hai)";
-  $("srtDropTitle").textContent = rs ? "SRT (jise sync karna hai)" : "Subtitle file (.srt / .vtt)";
-  $("srtDropSub").textContent = rs ? "e.g. translated SRT — text same rahega, sirf timings update hongi" : "Iske breaks exactly preserve honge";
+  $("audioDropTitle").textContent = rs ? "🎤 Translated / Dubbed Audio" : "Audio file";
+  $("audioDropSub").textContent = rs ? "TTS ya dubbed audio — SRT isi ke saath sync hogi" : "mp3 · wav · m4a · flac · mp4 · mkv … (koi size limit nahi — local hai)";
+  $("srtDropTitle").textContent = rs ? "💬 Translated SRT" : "Subtitle file (.srt / .vtt)";
+  $("srtDropSub").textContent = rs ? "Text/breaks same rahenge — sirf timings audio se update hongi" : "Iske breaks exactly preserve honge";
   $("runBtn").textContent = rs ? "🔁 Sync SRT ↔ Audio (100% local)" : "⚡ Transcribe · Re-time · Translate (100% local)";
 }
 
@@ -503,11 +512,12 @@ if($("ttsEnable").checked && $("ttsKey").value) refreshCredits();
 const TTS_TABS = {saved:"ttsTabSaved", library:"ttsTabLibrary", manual:"ttsTabManual"};
 function showTtsTab(name){
   for(const [k,id] of Object.entries(TTS_TABS)) $(id).hidden = (k!==name);
-  document.querySelectorAll(".tts-tab").forEach(b=>b.classList.toggle("active", b.dataset.tab===name));
+  document.querySelectorAll("#ttsOptions .tts-tab").forEach(b=>b.classList.toggle("active", b.dataset.tab===name));
   localStorage.setItem("ssl_tts_tab", name);
   if(name==="saved") renderSaved();
 }
-document.querySelectorAll(".tts-tab").forEach(b=>b.onclick=()=>showTtsTab(b.dataset.tab));
+// sirf TTS card ke andar wale tabs — mode/gap/source buttons ko mat chhuo
+document.querySelectorAll("#ttsOptions .tts-tab").forEach(b=>b.onclick=()=>showTtsTab(b.dataset.tab));
 
 // ---- selected voice (persist) ----
 let selVoice = null;

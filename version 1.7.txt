@@ -79,6 +79,14 @@ yahi file check karo.
 --------------------------------------------------
  CHANGELOG
 --------------------------------------------------
+[Version 1.7 fix] - 09 Aug 2026
+  * Re-sync button kaam nahi kar raha tha — TTS tabs ka wiring mode
+    buttons ka click overwrite kar deta tha (fixed, scoped)
+  * Re-sync mode ka poora ORANGE THEME — background, buttons, tabs sab
+    alag dikhte hain full (purple) mode se
+  * Re-sync me upload boxes ab "Translated / Dubbed Audio" aur
+    "Translated SRT" dikhate hain
+
 [Version 1.7] - 09 Aug 2026
   + RE-SYNC ONLY mode: SRT ↔ Audio — translated SRT ki timings
     kisi bhi audio (TTS/dubbed) se match karke "synced" SRT
