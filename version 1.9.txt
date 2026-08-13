@@ -87,6 +87,8 @@ yahi file check karo.
  CHANGELOG
 --------------------------------------------------
 [Version 1.9] - 10 Aug 2026
+  + SRT ki TOTAL LINES ab UI me directly dikhti hain — file drop karte hi
+    chip par ("episodio.srt — 1,234 lines") aur result me badge par
   * FIX "bad timestamp" error — kuch SRT me ",1000" jaisa 4-digit
     milliseconds hota hai (00:02:20,1000). Ab wo bhi parse hota hai
     (= 1 pura second), file reject nahi hoti

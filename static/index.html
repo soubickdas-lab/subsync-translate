@@ -282,6 +282,7 @@ footer{text-align:center;color:var(--muted);font-size:.78rem;margin-top:10px}
 
   <section class="card" id="resultCard" hidden>
     <h2><span class="step">4</span> Result
+      <span class="badge" id="linesBadge" hidden></span>
       <span class="badge" id="detectedBadge" hidden></span>
       <span class="badge ok" id="matchBadge" hidden></span>
     </h2>
@@ -443,12 +444,18 @@ wireDrop($("dropAudio"), $("audioFile"), f=>{
   $("dropAudio").classList.add("filled");
   updateRun();
 });
-wireDrop($("dropSrt"), $("srtFile"), f=>{
+wireDrop($("dropSrt"), $("srtFile"), async f=>{
   state.srtFile=f;
+  state.srtLines=null;
   $("srtChip").hidden=false;
   $("srtChip").textContent=f.name;
   $("dropSrt").classList.add("filled");
   updateRun();
+  try{
+    const n=((await f.text()).match(/-->/g)||[]).length;   // har cue me ek "-->"
+    state.srtLines=n;
+    $("srtChip").textContent=`${f.name} — ${n.toLocaleString()} lines`;
+  }catch(e){}
 });
 function updateRun(){ $("runBtn").disabled = !(state.audio && state.srtFile); }
 
@@ -803,6 +810,8 @@ function showResult(result){
     $("detectedBadge").textContent="🔍 audio: "+result.language;
   }
   const st=result.stats;
+  $("linesBadge").hidden=false;
+  $("linesBadge").textContent=`📝 ${result.segments.length.toLocaleString()} lines`;
   $("matchBadge").hidden=false;
   $("matchBadge").textContent=`⏱ ${st.matchedSegments}/${st.totalSegments} re-timed from audio`;
 
