@@ -1,3 +1,4 @@
+function droplyDoneTune(){try{const c=new (window.AudioContext||window.webkitAudioContext)();if(c.state==="suspended")c.resume().catch(()=>{});const t0=c.currentTime;const n=(f,st,d,v)=>{const o=c.createOscillator(),g=c.createGain();o.frequency.setValueAtTime(f,t0+st);g.gain.setValueAtTime(0,t0+st);g.gain.linearRampToValueAtTime(v||.15,t0+st+.015);g.gain.exponentialRampToValueAtTime(.0001,t0+st+d);o.connect(g);g.connect(c.destination);o.start(t0+st);o.stop(t0+st+d+.05)};n(523.25,0,.14);n(659.25,.1,.14);n(783.99,.2,.32,.19)}catch(e){}}
 /* ============================================================
    SubSync Translate
    Audio + SRT  →  translated SRT with identical segment breaks,
@@ -599,7 +600,7 @@ els.runBtn.addEventListener("click", async () => {
     await translateAll(segments, target, engine, apiKey,
       (done, total) => setProgress(55 + (done / Math.max(total, 1)) * 43, `Translating… batch ${Math.min(done + 1, total)}/${total}`));
 
-    setProgress(100, "Done ✔");
+    setProgress(100, "Done ✔"); droplyDoneTune();
     log("Done. Review the table, edit any cell, then download.", "ok");
     renderResults(segments, target);
   } catch (err) {
